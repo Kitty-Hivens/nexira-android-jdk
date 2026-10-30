@@ -1,0 +1,17 @@
+Subject: [PATCH] 0005-android-prevent-build-of-libsa.patch
+
+---
+ make/modules/jdk.hotspot.agent/Lib.gmk | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/make/modules/jdk.hotspot.agent/Lib.gmk b/make/modules/jdk.hotspot.agent/Lib.gmk
+index ed8de631d..7a597d254 100644
+--- a/make/modules/jdk.hotspot.agent/Lib.gmk
++++ b/make/modules/jdk.hotspot.agent/Lib.gmk
+@@ -80,6 +80,5 @@ $(eval $(call SetupJdkLibrary, BUILD_LIBSAPROC, \
+     LIBS_windows := dbgeng.lib, \
+ ))
+ 
+-TARGETS += $(BUILD_LIBSAPROC)
+ 
+ ################################################################################

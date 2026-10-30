@@ -1,0 +1,21 @@
+Subject: [PATCH] 0018-arm-fix-assembly-in-os_linux_arm.cpp.patch
+
+---
+ src/hotspot/os_cpu/linux_arm/os_linux_arm.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/hotspot/os_cpu/linux_arm/os_linux_arm.cpp b/src/hotspot/os_cpu/linux_arm/os_linux_arm.cpp
+index 6cdaa1251..ee77db593 100644
+--- a/src/hotspot/os_cpu/linux_arm/os_linux_arm.cpp
++++ b/src/hotspot/os_cpu/linux_arm/os_linux_arm.cpp
+@@ -451,8 +451,8 @@ void os::setup_fpu() {
+ #if !defined(__SOFTFP__) && defined(__VFP_FP__)
+   // Turn on IEEE-754 compliant VFP mode
+   __asm__ volatile (
+-    "mov %%r0, #0;"
+-    "fmxr fpscr, %%r0"
++    "mov r0, #0;"
++    "fmxr fpscr, r0"
+     : /* no output */ : /* no input */ : "r0"
+   );
+ #endif

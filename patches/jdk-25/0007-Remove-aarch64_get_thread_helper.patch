@@ -1,0 +1,26 @@
+Subject: [PATCH] 0007-Remove-aarch64_get_thread_helper.patch
+
+---
+ src/hotspot/os_cpu/linux_aarch64/threadLS_linux_aarch64.S | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/hotspot/os_cpu/linux_aarch64/threadLS_linux_aarch64.S b/src/hotspot/os_cpu/linux_aarch64/threadLS_linux_aarch64.S
+index 451c13773..deab716bd 100644
+--- a/src/hotspot/os_cpu/linux_aarch64/threadLS_linux_aarch64.S
++++ b/src/hotspot/os_cpu/linux_aarch64/threadLS_linux_aarch64.S
+@@ -22,6 +22,7 @@
+ 
+ #include "defs.S.inc"
+ 
++#ifndef __ANDROID__
+         // JavaThread::aarch64_get_thread_helper()
+         //
+         // Return the current thread pointer in x0.
+@@ -44,6 +45,7 @@ DECLARE_FUNC(_ZN10JavaThread25aarch64_get_thread_helperEv):
+         ret
+ 
+         .size _ZN10JavaThread25aarch64_get_thread_helperEv, .-_ZN10JavaThread25aarch64_get_thread_helperEv
++#endif
+ 
+ /* Emit .note.gnu.property section in case of PAC or BTI being enabled.
+  * For more details see "ELF for the Arm(R) 64-bit Architecture (AArch64)".

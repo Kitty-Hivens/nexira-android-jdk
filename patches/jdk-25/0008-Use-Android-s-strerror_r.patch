@@ -1,0 +1,24 @@
+Subject: [PATCH] 0008-Use-Android-s-strerror_r.patch
+
+---
+ src/java.base/unix/native/libjava/jni_util_md.c | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/src/java.base/unix/native/libjava/jni_util_md.c b/src/java.base/unix/native/libjava/jni_util_md.c
+index 7195b3def..283ba84ed 100644
+--- a/src/java.base/unix/native/libjava/jni_util_md.c
++++ b/src/java.base/unix/native/libjava/jni_util_md.c
+@@ -31,13 +31,6 @@
+ #include "jni_util.h"
+ #include "dlfcn.h"
+ 
+-#if defined(LINUX) && (defined(_GNU_SOURCE) || \
+-         (defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE < 200112L \
+-             && defined(_XOPEN_SOURCE) && _XOPEN_SOURCE < 600))
+-extern int __xpg_strerror_r(int, char *, size_t);
+-#define strerror_r(a, b, c) __xpg_strerror_r((a), (b), (c))
+-#endif
+-
+ void* getProcessHandle() {
+     static void *procHandle = NULL;
+     if (procHandle != NULL) {

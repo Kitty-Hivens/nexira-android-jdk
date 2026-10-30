@@ -1,0 +1,27 @@
+Subject: [PATCH] 0003-Define-sys-gettid-on-arm-and-aarch64.patch
+
+---
+ src/hotspot/os/linux/os_linux.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
+index 6682d4703..d0c21231c 100644
+--- a/src/hotspot/os/linux/os_linux.cpp
++++ b/src/hotspot/os/linux/os_linux.cpp
+@@ -500,11 +500,14 @@ bool os::Linux::get_tick_information(CPUPerfTicks* pticks, int which_logical_cpu
+ }
+ 
+ #ifndef SYS_gettid
+-// i386: 224, amd64: 186
+-  #if defined(__i386__)
++// i386 & arm: 224, amd64: 186, aarch64: 178
++  #if defined(__i386__) || defined(__arm__)
++     #define SYS_gettid 224
+     #define SYS_gettid 224
+   #elif defined(__amd64__)
+     #define SYS_gettid 186
++  #elif defined(__arm64__) || defined(__aarch64__)
++    #define SYS_gettid 178
+   #else
+     #error "Define SYS_gettid for this architecture"
+   #endif

@@ -1,0 +1,25 @@
+Subject: [PATCH] 
+ 0031-hotspot-os_linux-do-not-use-dlinfo-and-RTLD_DI_LINKM.patch
+
+---
+ src/hotspot/os/linux/os_linux.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
+index e186e7739..436c90c5d 100644
+--- a/src/hotspot/os/linux/os_linux.cpp
++++ b/src/hotspot/os/linux/os_linux.cpp
+@@ -2052,11 +2052,12 @@ const char* os::Linux::dll_path(void* lib) {
+   struct link_map *lmap;
+   const char* l_path = nullptr;
+   assert(lib != nullptr, "dll_path parameter must not be null");
+-
++#ifndef __ANDROID__
+   int res_dli = ::dlinfo(lib, RTLD_DI_LINKMAP, &lmap);
+   if (res_dli == 0) {
+     l_path = lmap->l_name;
+   }
++#endif
+   return l_path;
+ }
+ 

@@ -1,0 +1,19 @@
+Subject: [PATCH] 0029-version-script-remove-local-symbols.patch
+
+---
+ make/data/hotspot-symbols/version-script-clang.txt | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/make/data/hotspot-symbols/version-script-clang.txt b/make/data/hotspot-symbols/version-script-clang.txt
+index 351d64fdd..78c67147c 100644
+--- a/make/data/hotspot-symbols/version-script-clang.txt
++++ b/make/data/hotspot-symbols/version-script-clang.txt
+@@ -1,8 +1,4 @@
+ SUNWprivate_1.1 {
+   global:
+     *;
+-
+-  local:
+-    _fini;
+-    _init;
+ };

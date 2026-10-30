@@ -1,0 +1,62 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      major:
+        description: JDK major to build
+        default: "25"
+  push:
+    tags:
+      - "jdk-*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the major
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version=${GITHUB_REF_NAME#jdk-}
+            echo "MAJOR=${version%%.*}" >> "$GITHUB_ENV"
+          else
+            echo "MAJOR=${{ inputs.major }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm autoconf make zip unzip libasound2-dev libcups2-dev libfontconfig1-dev
+
+      - name: Build
+        run: scripts/build.sh "$MAJOR"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jdk-${{ env.MAJOR }}-android-aarch64
+          path: |
+            work/out/*.zip
+            work/out/*.sha256
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          built=$(ls work/out/*.zip)
+          [ "$(basename "$built")" = "jdk-${GITHUB_REF_NAME#jdk-}-android-aarch64.zip" ] \
+            || { echo "built $(basename "$built"), tag is $GITHUB_REF_NAME"; exit 1; }
+          gh release create "$GITHUB_REF_NAME" work/out/*.zip work/out/*.sha256 \
+            --title "OpenJDK ${GITHUB_REF_NAME#jdk-} for Android" \
+            --notes "OpenJDK ${GITHUB_REF_NAME#jdk-} for Android aarch64. Verify the download against the attached SHA-256 file."

@@ -1,0 +1,25 @@
+Subject: [PATCH] 0027-make-cflags-handle-arm-like-other-arches.patch
+
+---
+ make/autoconf/flags-cflags.m4 | 8 +-------
+ 1 file changed, 1 insertion(+), 7 deletions(-)
+
+diff --git a/make/autoconf/flags-cflags.m4 b/make/autoconf/flags-cflags.m4
+index a2fbae9c4..2ae86715d 100644
+--- a/make/autoconf/flags-cflags.m4
++++ b/make/autoconf/flags-cflags.m4
+@@ -68,13 +68,7 @@ AC_DEFUN([FLAGS_SETUP_SHARED_LIBS],
+       fi
+       SET_SHARED_LIBRARY_NAME='-Wl,-soname=[$]1'
+ 
+-      # arm specific settings
+-      if test "x$OPENJDK_TARGET_CPU" = "xarm"; then
+-        # '-Wl,-z,origin' isn't used on arm.
+-        SET_SHARED_LIBRARY_ORIGIN='-Wl,-rpath,\$$$$ORIGIN[$]1'
+-      else
+-        SET_SHARED_LIBRARY_ORIGIN="-Wl,-z,origin $SET_EXECUTABLE_ORIGIN"
+-      fi
++      SET_SHARED_LIBRARY_ORIGIN="-Wl,-z,origin $SET_EXECUTABLE_ORIGIN"
+     fi
+ 
+   elif test "x$TOOLCHAIN_TYPE" = xmicrosoft; then
