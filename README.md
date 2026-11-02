@@ -34,7 +34,7 @@ A release is a tag `jdk-<version>` (for example `jdk-25.0.5`). The workflow buil
 | 25    | 25.0.5           | Runs on an arm64 Android 16 device (JIT, threads, GC, nio)   |
 | 21    | 21.0.13          | Runs on an arm64 Android 16 device (JIT, threads, GC, nio)   |
 | 17    | 17.0.21          | Runs on an arm64 Android 16 device (JIT, threads, GC, nio)   |
-| 8     | 8u492            | Builds (JRE image), the VM stops while linking its first class |
+| 8     | 8u492            | Runs on an arm64 Android 16 device (JIT, threads, GC, nio)   |
 
 ## License
 
