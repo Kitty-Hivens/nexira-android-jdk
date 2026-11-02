@@ -1,0 +1,18 @@
+Subject: [PATCH] nexira: use the unscaled prefetch for a negative offset
+
+The integrated assembler of clang rejects a negative offset on prfm, which the GNU assembler quietly turns into prfum.
+
+---
+diff --git a/hotspot/src/os_cpu/linux_aarch64/vm/copy_linux_aarch64.s b/hotspot/src/os_cpu/linux_aarch64/vm/copy_linux_aarch64.s
+index 6d00d9f7..a5d0c9a2 100644
+--- a/hotspot/src/os_cpu/linux_aarch64/vm/copy_linux_aarch64.s
++++ b/hotspot/src/os_cpu/linux_aarch64/vm/copy_linux_aarch64.s
+@@ -329,7 +329,7 @@ unal_bwd_copy:
+         blo     unal_bwd_copy_drain
+ 
+ unal_bwd_copy_again:
+-        prfm    pldl1keep, [s, #-256]
++        prfum    pldl1keep, [s, #-256]
+         str     t1, [d, #-8]
+         stp     t3, t0, [d, #-24]
+         ldp     t0, t1, [s, #-16]

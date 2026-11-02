@@ -1,0 +1,18 @@
+Subject: [PATCH] nexira: do not link the font library against a toolkit that is not built
+
+A headless build has no X toolkit library, and the symbols the font library takes from the toolkit are left for the loader.
+
+---
+diff --git a/jdk/make/lib/Awt2dLibraries.gmk b/jdk/make/lib/Awt2dLibraries.gmk
+index 9d908f84..bc3cc671 100644
+--- a/jdk/make/lib/Awt2dLibraries.gmk
++++ b/jdk/make/lib/Awt2dLibraries.gmk
+@@ -979,7 +979,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBFONTMANAGER, \
+         $(subst -Wl$(COMMA)-z$(COMMA)defs,,$(LDFLAGS_JDKLIB))) $(LDFLAGS_CXX_JDK) \
+         $(call SET_SHARED_LIBRARY_ORIGIN), \
+     LDFLAGS_SUFFIX := $(BUILD_LIBFONTMANAGER_FONTLIB), \
+-    LDFLAGS_SUFFIX_linux := -lawt -lawt_xawt $(LIBM) $(LIBCXX) -ljava -ljvm -lc, \
++    LDFLAGS_SUFFIX_linux := -lawt $(LIBM) $(LIBCXX) -ljava -ljvm -lc, \
+     LDFLAGS_SUFFIX_solaris := -lawt -lawt_headless -lc $(LIBM) $(LIBCXX) -ljava -ljvm, \
+     LDFLAGS_SUFFIX_aix := -lawt -lawt_headless $(LIBM) $(LIBCXX) -ljava -ljvm,\
+     LDFLAGS_SUFFIX_macosx := -lawt $(LIBM) $(LIBCXX) -undefined dynamic_lookup \

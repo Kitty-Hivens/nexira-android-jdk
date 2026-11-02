@@ -1,0 +1,20 @@
+Subject: [PATCH] nexira: do not build the AWT embedding library in a headless build
+
+It links symbols only the X toolkit library defines.
+
+---
+diff --git a/jdk/make/lib/Awt2dLibraries.gmk b/jdk/make/lib/Awt2dLibraries.gmk
+index 9d908f84..85115bff 100644
+--- a/jdk/make/lib/Awt2dLibraries.gmk
++++ b/jdk/make/lib/Awt2dLibraries.gmk
+@@ -1150,7 +1150,9 @@ else # OPENJDK_TARGET_OS not windows
+ 
+ endif # OPENJDK_TARGET_OS
+ 
+-BUILD_LIBRARIES += $(BUILD_LIBJAWT)
++ifndef BUILD_HEADLESS_ONLY
++  BUILD_LIBRARIES += $(BUILD_LIBJAWT)
++endif
+ 
+ ##########################################################################################
+ 

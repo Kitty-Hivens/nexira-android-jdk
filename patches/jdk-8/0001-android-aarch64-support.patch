@@ -1,0 +1,1631 @@
+Subject: [PATCH] Android aarch64 support for 8u
+
+The Android port of 8u as published by the AOF-Dev jdk8u fork (GPL-2.0 with the Classpath Exception), taken as the single commit on top of 8u312-b05 and applied unchanged to the pinned release.
+
+---
+diff --git a/common/autoconf/build-aux/autoconf-config.sub b/common/autoconf/build-aux/autoconf-config.sub
+index 1aab2b30..c3ba73c1 100644
+--- a/common/autoconf/build-aux/autoconf-config.sub
++++ b/common/autoconf/build-aux/autoconf-config.sub
+@@ -1257,6 +1257,9 @@ case $os in
+ 	-gnu/linux*)
+ 		os=`echo $os | sed -e 's|gnu/linux|linux-gnu|'`
+ 		;;
++	-android*)
++		os=-linux
++		;;
+ 	# First accept the basic system types.
+ 	# The portable systems comes first.
+ 	# Each alternative MUST END IN A *, to match a version number.
+diff --git a/hotspot/agent/src/os/linux/elfmacros.h b/hotspot/agent/src/os/linux/elfmacros.h
+index 2dc0b611..e85c7db1 100644
+--- a/hotspot/agent/src/os/linux/elfmacros.h
++++ b/hotspot/agent/src/os/linux/elfmacros.h
+@@ -34,9 +34,9 @@
+ #define ELF_DYN         Elf64_Dyn
+ #define ELF_ADDR        Elf64_Addr
+ #define ELF_AUXV        Elf64_auxv_t
+-
++#ifndef __ANDROID__
+ #define ELF_ST_TYPE     ELF64_ST_TYPE
+-
++#endif
+ #else
+ 
+ #define ELF_EHDR        Elf32_Ehdr
+@@ -47,9 +47,9 @@
+ #define ELF_DYN         Elf32_Dyn
+ #define ELF_ADDR        Elf32_Addr
+ #define ELF_AUXV        Elf32_auxv_t
+-
++#ifndef __ANDROID__
+ #define ELF_ST_TYPE     ELF32_ST_TYPE
+-
++#endif
+ #endif
+ 
+ 
+diff --git a/hotspot/agent/src/os/linux/libproc_impl.c b/hotspot/agent/src/os/linux/libproc_impl.c
+index 73a15ce3..02749fc2 100644
+--- a/hotspot/agent/src/os/linux/libproc_impl.c
++++ b/hotspot/agent/src/os/linux/libproc_impl.c
+@@ -26,7 +26,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <fcntl.h>
+-#include <thread_db.h>
++#include <sys/procfs.h>
+ #include "libproc_impl.h"
+ 
+ #define SA_ALTROOT "SA_ALTROOT"
+@@ -105,13 +105,6 @@ bool is_debug() {
+ bool init_libproc(bool debug) {
+    // init debug mode
+    _libsaproc_debug = debug;
+-
+-   // initialize the thread_db library
+-   if (td_init() != TD_OK) {
+-     print_debug("libthread_db's td_init failed\n");
+-     return false;
+-   }
+-
+    return true;
+ }
+ 
+@@ -243,7 +236,7 @@ const char* symbol_for_pc(struct ps_prochandle* ph, uintptr_t addr, uintptr_t* p
+ }
+ 
+ // add a thread to ps_prochandle
+-thread_info* add_thread_info(struct ps_prochandle* ph, pthread_t pthread_id, lwpid_t lwp_id) {
++thread_info* add_thread_info(struct ps_prochandle* ph, lwpid_t lwp_id) {
+    thread_info* newthr;
+    if ( (newthr = (thread_info*) calloc(1, sizeof(thread_info))) == NULL) {
+       print_debug("can't allocate memory for thread_info\n");
+@@ -251,7 +244,6 @@ thread_info* add_thread_info(struct ps_prochandle* ph, pthread_t pthread_id, lwp
+    }
+ 
+    // initialize thread info
+-   newthr->pthread_id = pthread_id;
+    newthr->lwp_id = lwp_id;
+ 
+    // add new thread to the list
+@@ -282,64 +274,6 @@ void delete_thread_info(struct ps_prochandle* ph, thread_info* thr_to_be_removed
+     free(current_thr);
+ }
+ 
+-// struct used for client data from thread_db callback
+-struct thread_db_client_data {
+-   struct ps_prochandle* ph;
+-   thread_info_callback callback;
+-};
+-
+-// callback function for libthread_db
+-static int thread_db_callback(const td_thrhandle_t *th_p, void *data) {
+-  struct thread_db_client_data* ptr = (struct thread_db_client_data*) data;
+-  td_thrinfo_t ti;
+-  td_err_e err;
+-
+-  memset(&ti, 0, sizeof(ti));
+-  err = td_thr_get_info(th_p, &ti);
+-  if (err != TD_OK) {
+-    print_debug("libthread_db : td_thr_get_info failed, can't get thread info\n");
+-    return err;
+-  }
+-
+-  print_debug("thread_db : pthread %d (lwp %d)\n", ti.ti_tid, ti.ti_lid);
+-
+-  if (ti.ti_state == TD_THR_UNKNOWN || ti.ti_state == TD_THR_ZOMBIE) {
+-    print_debug("Skipping pthread %d (lwp %d)\n", ti.ti_tid, ti.ti_lid);
+-    return TD_OK;
+-  }
+-
+-  if (ptr->callback(ptr->ph, ti.ti_tid, ti.ti_lid) != true)
+-    return TD_ERR;
+-
+-  return TD_OK;
+-}
+-
+-// read thread_info using libthread_db
+-bool read_thread_info(struct ps_prochandle* ph, thread_info_callback cb) {
+-  struct thread_db_client_data mydata;
+-  td_thragent_t* thread_agent = NULL;
+-  if (td_ta_new(ph, &thread_agent) != TD_OK) {
+-     print_debug("can't create libthread_db agent\n");
+-     return false;
+-  }
+-
+-  mydata.ph = ph;
+-  mydata.callback = cb;
+-
+-  // we use libthread_db iterator to iterate thru list of threads.
+-  if (td_ta_thr_iter(thread_agent, thread_db_callback, &mydata,
+-                 TD_THR_ANY_STATE, TD_THR_LOWEST_PRIORITY,
+-                 TD_SIGNO_MASK, TD_THR_ANY_USER_FLAGS) != TD_OK) {
+-     td_ta_delete(thread_agent);
+-     return false;
+-  }
+-
+-  // delete thread agent
+-  td_ta_delete(thread_agent);
+-  return true;
+-}
+-
+-
+ // get number of threads
+ int get_num_threads(struct ps_prochandle* ph) {
+    return ph->num_threads;
+diff --git a/hotspot/agent/src/os/linux/libproc_impl.h b/hotspot/agent/src/os/linux/libproc_impl.h
+index 1d25a092..8546bbf5 100644
+--- a/hotspot/agent/src/os/linux/libproc_impl.h
++++ b/hotspot/agent/src/os/linux/libproc_impl.h
+@@ -46,7 +46,6 @@ typedef struct lib_info {
+ // list of threads
+ typedef struct thread_info {
+    lwpid_t                  lwp_id;
+-   pthread_t                pthread_id; // not used cores, always -1
+    struct user_regs_struct  regs;       // not for process, core uses for caching regset
+    struct thread_info*      next;
+ } thread_info;
+@@ -108,11 +107,6 @@ void print_debug(const char* format,...);
+ void print_error(const char* format,...);
+ bool is_debug();
+ 
+-typedef bool (*thread_info_callback)(struct ps_prochandle* ph, pthread_t pid, lwpid_t lwpid);
+-
+-// reads thread info using libthread_db and calls above callback for each thread
+-bool read_thread_info(struct ps_prochandle* ph, thread_info_callback cb);
+-
+ // deletes a thread from the thread list
+ void delete_thread_info(struct ps_prochandle* ph, thread_info* thr);
+ 
+@@ -124,7 +118,7 @@ lib_info* add_lib_info_fd(struct ps_prochandle* ph, const char* libname, int fd,
+                           uintptr_t base);
+ 
+ // adds a new thread to threads list, returns NULL on failure
+-thread_info* add_thread_info(struct ps_prochandle* ph, pthread_t pthread_id, lwpid_t lwp_id);
++thread_info* add_thread_info(struct ps_prochandle* ph, lwpid_t lwp_id);
+ 
+ // a test for ELF signature without using libelf
+ bool is_elf_file(int fd);
+diff --git a/hotspot/agent/src/os/linux/proc_service.h b/hotspot/agent/src/os/linux/proc_service.h
+index 802e5b0b..ddce4924 100644
+--- a/hotspot/agent/src/os/linux/proc_service.h
++++ b/hotspot/agent/src/os/linux/proc_service.h
+@@ -26,7 +26,9 @@
+ #define _PROC_SERVICE_H_
+ 
+ #include <stdio.h>
+-#include <thread_db.h>
++#include <sys/procfs.h>
++
++struct ps_prochandle;
+ 
+ // Linux does not have the proc service library, though it does provide the
+ // thread_db library which can be used to manipulate threads without having
+diff --git a/hotspot/agent/src/os/linux/ps_core.c b/hotspot/agent/src/os/linux/ps_core.c
+index b7fe4c09..68b4b871 100644
+--- a/hotspot/agent/src/os/linux/ps_core.c
++++ b/hotspot/agent/src/os/linux/ps_core.c
+@@ -32,6 +32,9 @@
+ #include <link.h>
+ #include "libproc_impl.h"
+ #include "salibelf.h"
++#ifdef __ANDROID__
++
++#endif
+ 
+ // This file has the libproc implementation to read core files.
+ // For live processes, refer to ps_proc.c. Portions of this is adapted
+@@ -547,7 +550,7 @@ static bool core_handle_prstatus(struct ps_prochandle* ph, const char* buf, size
+    thread_info* newthr;
+    print_debug("got integer regset for lwp %d\n", prstat->pr_pid);
+    // we set pthread_t to -1 for core dump
+-   if((newthr = add_thread_info(ph, (pthread_t) -1,  prstat->pr_pid)) == NULL)
++   if((newthr = add_thread_info(ph,  prstat->pr_pid)) == NULL)
+       return false;
+ 
+    // copy regs
+diff --git a/hotspot/agent/src/os/linux/ps_proc.c b/hotspot/agent/src/os/linux/ps_proc.c
+index c4d6a9ec..9ea073c2 100644
+--- a/hotspot/agent/src/os/linux/ps_proc.c
++++ b/hotspot/agent/src/os/linux/ps_proc.c
+@@ -28,6 +28,7 @@
+ #include <signal.h>
+ #include <errno.h>
+ #include <elf.h>
++#include <dirent.h>
+ #include <ctype.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
+@@ -338,11 +339,6 @@ static char * fgets_no_cr(char * buf, int n, FILE *fp)
+    return rslt;
+ }
+ 
+-// callback for read_thread_info
+-static bool add_new_thread(struct ps_prochandle* ph, pthread_t pthread_id, lwpid_t lwp_id) {
+-  return add_thread_info(ph, pthread_id, lwp_id) != NULL;
+-}
+-
+ static bool read_lib_info(struct ps_prochandle* ph) {
+   char fname[32];
+   char buf[PATH_MAX];
+@@ -462,6 +458,7 @@ struct ps_prochandle* Pgrab(pid_t pid, char* err_buf, size_t err_buf_len) {
+ 
+   // initialize ps_prochandle
+   ph->pid = pid;
++  add_thread_info(ph, ph->pid);
+ 
+   // initialize vtable
+   ph->ops = &process_ops;
+@@ -471,8 +468,30 @@ struct ps_prochandle* Pgrab(pid_t pid, char* err_buf, size_t err_buf_len) {
+   // the list of threads within the same process.
+   read_lib_info(ph);
+ 
+-  // read thread info
+-  read_thread_info(ph, add_new_thread);
++  /*
++   * Read thread info.
++   * SA scans all tasks in /proc/<PID>/task to read all threads info.
++   */
++  char taskpath[PATH_MAX];
++  DIR *dirp;
++  struct dirent *entry;
++
++  snprintf(taskpath, PATH_MAX, "/proc/%d/task", ph->pid);
++  dirp = opendir(taskpath);
++  int lwp_id;
++  while ((entry = readdir(dirp)) != NULL) {
++    if (*entry->d_name == '.') {
++      continue;
++    }
++    lwp_id = atoi(entry->d_name);
++    if (lwp_id == ph->pid) {
++      continue;
++    }
++    if (!process_doesnt_exist(lwp_id)) {
++      add_thread_info(ph, lwp_id);
++    }
++  }
++  closedir(dirp);
+ 
+   // attach to the threads
+   thr = ph->threads;
+diff --git a/hotspot/agent/src/os/linux/symtab.c b/hotspot/agent/src/os/linux/symtab.c
+index fbe69999..deebee9f 100644
+--- a/hotspot/agent/src/os/linux/symtab.c
++++ b/hotspot/agent/src/os/linux/symtab.c
+@@ -30,6 +30,168 @@
+ #include "symtab.h"
+ #include "salibelf.h"
+ 
++#ifdef __ANDROID__
++#include <errno.h>
++struct __hsearch {
++	size_t offset_basis;	/* Initial value for FNV-1a hashing. */
++	size_t index_mask;	/* Bitmask for indexing the table. */
++	size_t entries_used;	/* Number of entries currently used. */
++	ENTRY *entries;		/* Hash table entries. */
++};
++static int
++hcreate_r(size_t nel, struct hsearch_data *htab)
++{
++	struct __hsearch *hsearch;
++
++	/*
++	 * Allocate a hash table object. Ignore the provided hint and start
++	 * off with a table of sixteen entries. In most cases this hint is
++	 * just a wild guess. Resizing the table dynamically if the use
++	 * increases a threshold does not affect the worst-case running time.
++	 */
++	hsearch = malloc(sizeof(*hsearch));
++	if (hsearch == NULL)
++		return 0;
++	hsearch->entries = calloc(16, sizeof(ENTRY));
++	if (hsearch->entries == NULL) {
++		free(hsearch);
++		return 0;
++	}
++
++	/*
++	 * Pick a random initialization for the FNV-1a hashing. This makes it
++	 * hard to come up with a fixed set of keys to force hash collisions.
++	 */
++	arc4random_buf(&hsearch->offset_basis, sizeof(hsearch->offset_basis));
++	hsearch->index_mask = 0xf;
++	hsearch->entries_used = 0;
++	htab->__hsearch = hsearch;
++	return 1;
++}
++static void
++hdestroy_r(struct hsearch_data *htab)
++{
++	struct __hsearch *hsearch;
++
++	/* Free hash table object and its entries. */
++	hsearch = htab->__hsearch;
++	free(hsearch->entries);
++	free(hsearch);
++}
++/*
++ * Look up an unused entry in the hash table for a given hash. For this
++ * implementation we use quadratic probing. Quadratic probing has the
++ * advantage of preventing primary clustering.
++ */
++static ENTRY *
++hsearch_lookup_free(struct __hsearch *hsearch, size_t hash)
++{
++	size_t index, i;
++
++	for (index = hash, i = 0;; index += ++i) {
++		ENTRY *entry = &hsearch->entries[index & hsearch->index_mask];
++		if (entry->key == NULL)
++			return (entry);
++	}
++}
++
++/*
++ * Computes an FNV-1a hash of the key. Depending on the pointer size, this
++ * either uses the 32- or 64-bit FNV prime.
++ */
++static size_t
++hsearch_hash(size_t offset_basis, const char *str)
++{
++	size_t hash;
++
++	hash = offset_basis;
++	while (*str != '\0') {
++		hash ^= (uint8_t)*str++;
++		if (sizeof(size_t) * CHAR_BIT <= 32)
++			hash *= UINT32_C(16777619);
++		else
++			hash *= UINT64_C(1099511628211);
++	}
++	return (hash);
++}
++
++static int
++hsearch_r(ENTRY item, ACTION action, ENTRY **retval, struct hsearch_data *htab)
++{
++	struct __hsearch *hsearch;
++	ENTRY *entry, *old_entries, *new_entries;
++	size_t hash, index, i, old_hash, old_count, new_count;
++
++	hsearch = htab->__hsearch;
++	hash = hsearch_hash(hsearch->offset_basis, item.key);
++
++	/*
++	 * Search the hash table for an existing entry for this key.
++	 * Stop searching if we run into an unused hash table entry.
++	 */
++	for (index = hash, i = 0;; index += ++i) {
++		entry = &hsearch->entries[index & hsearch->index_mask];
++		if (entry->key == NULL)
++			break;
++		if (strcmp(entry->key, item.key) == 0) {
++			*retval = entry;
++			return (1);
++		}
++	}
++
++	/* Only perform the insertion if action is set to ENTER. */
++	if (action == FIND) {
++		errno = ESRCH;
++		return (0);
++	}
++
++	if (hsearch->entries_used * 2 >= hsearch->index_mask) {
++		/* Preserve the old hash table entries. */
++		old_count = hsearch->index_mask + 1;
++		old_entries = hsearch->entries;
++
++		/*
++		 * Allocate and install a new table if insertion would
++		 * yield a hash table that is more than 50% used. By
++		 * using 50% as a threshold, a lookup will only take up
++		 * to two steps on average.
++		 */
++		new_count = (hsearch->index_mask + 1) * 2;
++		new_entries = calloc(new_count, sizeof(ENTRY));
++		if (new_entries == NULL)
++			return (0);
++		hsearch->entries = new_entries;
++		hsearch->index_mask = new_count - 1;
++
++		/* Copy over the entries from the old table to the new table. */
++		for (i = 0; i < old_count; ++i) {
++			entry = &old_entries[i];
++			if (entry->key != NULL) {
++				old_hash = hsearch_hash(hsearch->offset_basis,
++				    entry->key);
++				*hsearch_lookup_free(hsearch, old_hash) =
++				    *entry;
++			}
++		}
++
++		/* Destroy the old hash table entries. */
++		free(old_entries);
++
++		/*
++		 * Perform a new lookup for a free table entry, so that
++		 * we insert the entry into the new hash table.
++		 */
++		hsearch = htab->__hsearch;
++		entry = hsearch_lookup_free(hsearch, hash);
++	}
++
++	/* Insert the new entry into the hash table. */
++	*entry = item;
++	++hsearch->entries_used;
++	*retval = entry;
++	return (1);
++}
++#endif // __ANDROID__
+ 
+ // ----------------------------------------------------
+ // functions for symbol lookups
+diff --git a/hotspot/make/linux/makefiles/saproc.make b/hotspot/make/linux/makefiles/saproc.make
+index ffc0ec5c..01db60e8 100644
+--- a/hotspot/make/linux/makefiles/saproc.make
++++ b/hotspot/make/linux/makefiles/saproc.make
+@@ -103,7 +103,7 @@ $(LIBSAPROC): $(SASRCFILES) $(SAMAPFILE)
+ 	           $(SA_OPT_FLAGS)                                      \
+ 	           $(EXTRA_CFLAGS)                                      \
+ 	           -o $@                                                \
+-	           -lthread_db -ldl
++	           -ldl
+ ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
+   ifneq ($(STRIP_POLICY),no_strip)
+ 	$(QUIETLY) $(OBJCOPY) --only-keep-debug $@ $(LIBSAPROC_DEBUGINFO)
+diff --git a/hotspot/make/linux/makefiles/vm.make b/hotspot/make/linux/makefiles/vm.make
+index 04b7c202..075afa9d 100644
+--- a/hotspot/make/linux/makefiles/vm.make
++++ b/hotspot/make/linux/makefiles/vm.make
+@@ -130,7 +130,7 @@ ASFLAGS += $(EXTRA_ASFLAGS)
+ # the same could be done by separate execstack command
+ LFLAGS += -Xlinker -z -Xlinker noexecstack
+ 
+-LIBS += -lm -ldl -lpthread
++LIBS += -lm -ldl -pthread
+ 
+ # By default, link the *.o into the library, not the executable.
+ LINK_INTO$(LINK_INTO) = LIBJVM
+diff --git a/hotspot/src/os/linux/vm/ifaddrs.inc.h b/hotspot/src/os/linux/vm/ifaddrs.inc.h
+new file mode 100644
+index 00000000..9e23b291
+--- /dev/null
++++ b/hotspot/src/os/linux/vm/ifaddrs.inc.h
+@@ -0,0 +1,600 @@
++/*
++Copyright (c) 2013, Kenneth MacKay
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without modification,
++are permitted provided that the following conditions are met:
++ * Redistributions of source code must retain the above copyright notice, this
++   list of conditions and the following disclaimer.
++ * Redistributions in binary form must reproduce the above copyright notice,
++   this list of conditions and the following disclaimer in the documentation
++   and/or other materials provided with the distribution.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
++ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
++ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
++ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++*/
++
++#include "ifaddrs.h"
++
++#include <string.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <unistd.h>
++#include <sys/socket.h>
++#include <net/if_arp.h>
++#include <netinet/in.h>
++#include <linux/netlink.h>
++#include <linux/rtnetlink.h>
++
++typedef struct NetlinkList
++{
++    struct NetlinkList *m_next;
++    struct nlmsghdr *m_data;
++    unsigned int m_size;
++} NetlinkList;
++
++static int netlink_socket(void)
++{
++    int l_socket = socket(PF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
++    if(l_socket < 0)
++    {
++        return -1;
++    }
++    
++    struct sockaddr_nl l_addr;
++    memset(&l_addr, 0, sizeof(l_addr));
++    l_addr.nl_family = AF_NETLINK;
++    if(bind(l_socket, (struct sockaddr *)&l_addr, sizeof(l_addr)) < 0)
++    {
++        close(l_socket);
++        return -1;
++    }
++    
++    return l_socket;
++}
++
++static int netlink_send(int p_socket, int p_request)
++{
++    char l_buffer[NLMSG_ALIGN(sizeof(struct nlmsghdr)) + NLMSG_ALIGN(sizeof(struct rtgenmsg))];
++    memset(l_buffer, 0, sizeof(l_buffer));
++    struct nlmsghdr *l_hdr = (struct nlmsghdr *)l_buffer;
++    struct rtgenmsg *l_msg = (struct rtgenmsg *)NLMSG_DATA(l_hdr);
++    
++    l_hdr->nlmsg_len = NLMSG_LENGTH(sizeof(*l_msg));
++    l_hdr->nlmsg_type = p_request;
++    l_hdr->nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST;
++    l_hdr->nlmsg_pid = 0;
++    l_hdr->nlmsg_seq = p_socket;
++    l_msg->rtgen_family = AF_UNSPEC;
++    
++    struct sockaddr_nl l_addr;
++    memset(&l_addr, 0, sizeof(l_addr));
++    l_addr.nl_family = AF_NETLINK;
++    return (sendto(p_socket, l_hdr, l_hdr->nlmsg_len, 0, (struct sockaddr *)&l_addr, sizeof(l_addr)));
++}
++
++static int netlink_recv(int p_socket, void *p_buffer, size_t p_len)
++{
++    struct msghdr l_msg;
++    struct iovec l_iov = { p_buffer, p_len };
++    struct sockaddr_nl l_addr;
++    int l_result;
++
++    for(;;)
++    {
++        l_msg.msg_name = (void *)&l_addr;
++        l_msg.msg_namelen = sizeof(l_addr);
++        l_msg.msg_iov = &l_iov;
++        l_msg.msg_iovlen = 1;
++        l_msg.msg_control = NULL;
++        l_msg.msg_controllen = 0;
++        l_msg.msg_flags = 0;
++        int l_result = recvmsg(p_socket, &l_msg, 0);
++        
++        if(l_result < 0)
++        {
++            if(errno == EINTR)
++            {
++                continue;
++            }
++            return -2;
++        }
++        
++        if(l_msg.msg_flags & MSG_TRUNC)
++        { // buffer was too small
++            return -1;
++        }
++        return l_result;
++    }
++}
++
++static struct nlmsghdr *getNetlinkResponse(int p_socket, int *p_size, int *p_done)
++{
++    size_t l_size = 4096;
++    void *l_buffer = NULL;
++    
++    for(;;)
++    {
++        free(l_buffer);
++        l_buffer = malloc(l_size);
++        
++        int l_read = netlink_recv(p_socket, l_buffer, l_size);
++        *p_size = l_read;
++        if(l_read == -2)
++        {
++            free(l_buffer);
++            return NULL;
++        }
++        if(l_read >= 0)
++        {
++            pid_t l_pid = getpid();
++            struct nlmsghdr *l_hdr;
++            for(l_hdr = (struct nlmsghdr *)l_buffer; NLMSG_OK(l_hdr, (unsigned int)l_read); l_hdr = (struct nlmsghdr *)NLMSG_NEXT(l_hdr, l_read))
++            {
++                if((pid_t)l_hdr->nlmsg_pid != l_pid || (int)l_hdr->nlmsg_seq != p_socket)
++                {
++                    continue;
++                }
++                
++                if(l_hdr->nlmsg_type == NLMSG_DONE)
++                {
++                    *p_done = 1;
++                    break;
++                }
++                
++                if(l_hdr->nlmsg_type == NLMSG_ERROR)
++                {
++                    free(l_buffer);
++                    return NULL;
++                }
++            }
++            return (struct nlmsghdr *)l_buffer;
++        }
++        
++        l_size *= 2;
++    }
++}
++
++static NetlinkList *newListItem(struct nlmsghdr *p_data, unsigned int p_size)
++{
++    NetlinkList *l_item = (NetlinkList *)malloc(sizeof(NetlinkList));
++    l_item->m_next = NULL;
++    l_item->m_data = p_data;
++    l_item->m_size = p_size;
++    return l_item;
++}
++
++static void freeResultList(NetlinkList *p_list)
++{
++    NetlinkList *l_cur;
++    while(p_list)
++    {
++        l_cur = p_list;
++        p_list = p_list->m_next;
++        free(l_cur->m_data);
++        free(l_cur);
++    }
++}
++
++static NetlinkList *getResultList(int p_socket, int p_request)
++{
++    if(netlink_send(p_socket, p_request) < 0)
++    {
++        return NULL;
++    }
++
++    NetlinkList *l_list = NULL;
++    NetlinkList *l_end = NULL;
++    int l_size;
++    int l_done = 0;
++    while(!l_done)
++    {
++        struct nlmsghdr *l_hdr = getNetlinkResponse(p_socket, &l_size, &l_done);
++        if(!l_hdr)
++        { // error
++            freeResultList(l_list);
++            return NULL;
++        }
++        
++        NetlinkList *l_item = newListItem(l_hdr, l_size);
++        if(!l_list)
++        {
++            l_list = l_item;
++        }
++        else
++        {
++            l_end->m_next = l_item;
++        }
++        l_end = l_item;
++    }
++    return l_list;
++}
++
++static size_t maxSize(size_t a, size_t b)
++{
++    return (a > b ? a : b);
++}
++
++static size_t calcAddrLen(sa_family_t p_family, int p_dataSize)
++{
++    switch(p_family)
++    {
++        case AF_INET:
++            return sizeof(struct sockaddr_in);
++        case AF_INET6:
++            return sizeof(struct sockaddr_in6);
++        case AF_PACKET:
++            return maxSize(sizeof(struct sockaddr_ll), offsetof(struct sockaddr_ll, sll_addr) + p_dataSize);
++        default:
++            return maxSize(sizeof(struct sockaddr), offsetof(struct sockaddr, sa_data) + p_dataSize);
++    }
++}
++
++static void makeSockaddr(sa_family_t p_family, struct sockaddr *p_dest, void *p_data, size_t p_size)
++{
++    switch(p_family)
++    {
++        case AF_INET:
++            memcpy(&((struct sockaddr_in*)p_dest)->sin_addr, p_data, p_size);
++            break;
++        case AF_INET6:
++            memcpy(&((struct sockaddr_in6*)p_dest)->sin6_addr, p_data, p_size);
++            break;
++        case AF_PACKET:
++            memcpy(((struct sockaddr_ll*)p_dest)->sll_addr, p_data, p_size);
++            ((struct sockaddr_ll*)p_dest)->sll_halen = p_size;
++            break;
++        default:
++            memcpy(p_dest->sa_data, p_data, p_size);
++            break;
++    }
++    p_dest->sa_family = p_family;
++}
++
++static void addToEnd(struct ifaddrs **p_resultList, struct ifaddrs *p_entry)
++{
++    if(!*p_resultList)
++    {
++        *p_resultList = p_entry;
++    }
++    else
++    {
++        struct ifaddrs *l_cur = *p_resultList;
++        while(l_cur->ifa_next)
++        {
++            l_cur = l_cur->ifa_next;
++        }
++        l_cur->ifa_next = p_entry;
++    }
++}
++
++static void interpretLink(struct nlmsghdr *p_hdr, struct ifaddrs **p_links, struct ifaddrs **p_resultList)
++{
++    struct ifinfomsg *l_info = (struct ifinfomsg *)NLMSG_DATA(p_hdr);
++
++    size_t l_nameSize = 0;
++    size_t l_addrSize = 0;
++    size_t l_dataSize = 0;
++    
++    size_t l_rtaSize = NLMSG_PAYLOAD(p_hdr, sizeof(struct ifinfomsg));
++    struct rtattr *l_rta;
++    for(l_rta = (struct rtattr *)(((char *)l_info) + NLMSG_ALIGN(sizeof(struct ifinfomsg))); RTA_OK(l_rta, l_rtaSize); l_rta = RTA_NEXT(l_rta, l_rtaSize))
++    {
++        void *l_rtaData = RTA_DATA(l_rta);
++        size_t l_rtaDataSize = RTA_PAYLOAD(l_rta);
++        switch(l_rta->rta_type)
++        {
++            case IFLA_ADDRESS:
++            case IFLA_BROADCAST:
++                l_addrSize += NLMSG_ALIGN(calcAddrLen(AF_PACKET, l_rtaDataSize));
++                break;
++            case IFLA_IFNAME:
++                l_nameSize += NLMSG_ALIGN(l_rtaSize + 1);
++                break;
++            case IFLA_STATS:
++                l_dataSize += NLMSG_ALIGN(l_rtaSize);
++                break;
++            default:
++                break;
++        }
++    }
++    
++    struct ifaddrs *l_entry = (struct ifaddrs *)malloc(sizeof(struct ifaddrs) + l_nameSize + l_addrSize + l_dataSize);
++    memset(l_entry, 0, sizeof(struct ifaddrs));
++    l_entry->ifa_name = (char*)"";
++    
++    char *l_name = ((char *)l_entry) + sizeof(struct ifaddrs);
++    char *l_addr = l_name + l_nameSize;
++    char *l_data = l_addr + l_addrSize;
++    
++    l_entry->ifa_flags = l_info->ifi_flags;
++    
++    l_rtaSize = NLMSG_PAYLOAD(p_hdr, sizeof(struct ifinfomsg));
++    for(l_rta = (struct rtattr *)(((char *)l_info) + NLMSG_ALIGN(sizeof(struct ifinfomsg))); RTA_OK(l_rta, l_rtaSize); l_rta = RTA_NEXT(l_rta, l_rtaSize))
++    {
++        void *l_rtaData = RTA_DATA(l_rta);
++        size_t l_rtaDataSize = RTA_PAYLOAD(l_rta);
++        switch(l_rta->rta_type)
++        {
++            case IFLA_ADDRESS:
++            case IFLA_BROADCAST:
++            {
++                size_t l_addrLen = calcAddrLen(AF_PACKET, l_rtaDataSize);
++                makeSockaddr(AF_PACKET, (struct sockaddr *)l_addr, l_rtaData, l_rtaDataSize);
++                ((struct sockaddr_ll *)l_addr)->sll_ifindex = l_info->ifi_index;
++                ((struct sockaddr_ll *)l_addr)->sll_hatype = l_info->ifi_type;
++                if(l_rta->rta_type == IFLA_ADDRESS)
++                {
++                    l_entry->ifa_addr = (struct sockaddr *)l_addr;
++                }
++                else
++                {
++                    l_entry->ifa_broadaddr = (struct sockaddr *)l_addr;
++                }
++                l_addr += NLMSG_ALIGN(l_addrLen);
++                break;
++            }
++            case IFLA_IFNAME:
++                strncpy(l_name, (char*)l_rtaData, l_rtaDataSize);
++                l_name[l_rtaDataSize] = '\0';
++                l_entry->ifa_name = l_name;
++                break;
++            case IFLA_STATS:
++                memcpy(l_data, l_rtaData, l_rtaDataSize);
++                l_entry->ifa_data = l_data;
++                break;
++            default:
++                break;
++        }
++    }
++    
++    addToEnd(p_resultList, l_entry);
++    p_links[l_info->ifi_index - 1] = l_entry;
++}
++
++static void interpretAddr(struct nlmsghdr *p_hdr, struct ifaddrs **p_links, struct ifaddrs **p_resultList)
++{
++    struct ifaddrmsg *l_info = (struct ifaddrmsg *)NLMSG_DATA(p_hdr);
++
++    size_t l_nameSize = 0;
++    size_t l_addrSize = 0;
++    
++    int l_addedNetmask = 0;
++    
++    size_t l_rtaSize = NLMSG_PAYLOAD(p_hdr, sizeof(struct ifaddrmsg));
++    struct rtattr *l_rta;
++    for(l_rta = (struct rtattr *)(((char *)l_info) + NLMSG_ALIGN(sizeof(struct ifaddrmsg))); RTA_OK(l_rta, l_rtaSize); l_rta = RTA_NEXT(l_rta, l_rtaSize))
++    {
++        void *l_rtaData = RTA_DATA(l_rta);
++        size_t l_rtaDataSize = RTA_PAYLOAD(l_rta);
++        if(l_info->ifa_family == AF_PACKET)
++        {
++            continue;
++        }
++        
++        switch(l_rta->rta_type)
++        {
++            case IFA_ADDRESS:
++            case IFA_LOCAL:
++                if((l_info->ifa_family == AF_INET || l_info->ifa_family == AF_INET6) && !l_addedNetmask)
++                { // make room for netmask
++                    l_addrSize += NLMSG_ALIGN(calcAddrLen(l_info->ifa_family, l_rtaDataSize));
++                    l_addedNetmask = 1;
++                }
++            case IFA_BROADCAST:
++                l_addrSize += NLMSG_ALIGN(calcAddrLen(l_info->ifa_family, l_rtaDataSize));
++                break;
++            case IFA_LABEL:
++                l_nameSize += NLMSG_ALIGN(l_rtaSize + 1);
++                break;
++            default:
++                break;
++        }
++    }
++    
++    struct ifaddrs *l_entry = (struct ifaddrs *)malloc(sizeof(struct ifaddrs) + l_nameSize + l_addrSize);
++    memset(l_entry, 0, sizeof(struct ifaddrs));
++    l_entry->ifa_name = p_links[l_info->ifa_index - 1]->ifa_name;
++    
++    char *l_name = ((char *)l_entry) + sizeof(struct ifaddrs);
++    char *l_addr = l_name + l_nameSize;
++    
++    l_entry->ifa_flags = l_info->ifa_flags | p_links[l_info->ifa_index - 1]->ifa_flags;
++    
++    l_rtaSize = NLMSG_PAYLOAD(p_hdr, sizeof(struct ifaddrmsg));
++    for(l_rta = (struct rtattr *)(((char *)l_info) + NLMSG_ALIGN(sizeof(struct ifaddrmsg))); RTA_OK(l_rta, l_rtaSize); l_rta = RTA_NEXT(l_rta, l_rtaSize))
++    {
++        void *l_rtaData = RTA_DATA(l_rta);
++        size_t l_rtaDataSize = RTA_PAYLOAD(l_rta);
++        switch(l_rta->rta_type)
++        {
++            case IFA_ADDRESS:
++            case IFA_BROADCAST:
++            case IFA_LOCAL:
++            {
++                size_t l_addrLen = calcAddrLen(l_info->ifa_family, l_rtaDataSize);
++                makeSockaddr(l_info->ifa_family, (struct sockaddr *)l_addr, l_rtaData, l_rtaDataSize);
++                if(l_info->ifa_family == AF_INET6)
++                {
++                    if(IN6_IS_ADDR_LINKLOCAL((struct in6_addr *)l_rtaData) || IN6_IS_ADDR_MC_LINKLOCAL((struct in6_addr *)l_rtaData))
++                    {
++                        ((struct sockaddr_in6 *)l_addr)->sin6_scope_id = l_info->ifa_index;
++                    }
++                }
++                
++                if(l_rta->rta_type == IFA_ADDRESS)
++                { // apparently in a point-to-point network IFA_ADDRESS contains the dest address and IFA_LOCAL contains the local address
++                    if(l_entry->ifa_addr)
++                    {
++                        l_entry->ifa_dstaddr = (struct sockaddr *)l_addr;
++                    }
++                    else
++                    {
++                        l_entry->ifa_addr = (struct sockaddr *)l_addr;
++                    }
++                }
++                else if(l_rta->rta_type == IFA_LOCAL)
++                {
++                    if(l_entry->ifa_addr)
++                    {
++                        l_entry->ifa_dstaddr = l_entry->ifa_addr;
++                    }
++                    l_entry->ifa_addr = (struct sockaddr *)l_addr;
++                }
++                else
++                {
++                    l_entry->ifa_broadaddr = (struct sockaddr *)l_addr;
++                }
++                l_addr += NLMSG_ALIGN(l_addrLen);
++                break;
++            }
++            case IFA_LABEL:
++                strncpy(l_name, (char*)l_rtaData, l_rtaDataSize);
++                l_name[l_rtaDataSize] = '\0';
++                l_entry->ifa_name = l_name;
++                break;
++            default:
++                break;
++        }
++    }
++    
++    if(l_entry->ifa_addr && (l_entry->ifa_addr->sa_family == AF_INET || l_entry->ifa_addr->sa_family == AF_INET6))
++    {
++        unsigned l_maxPrefix = (l_entry->ifa_addr->sa_family == AF_INET ? 32 : 128);
++        unsigned l_prefix = (l_info->ifa_prefixlen > l_maxPrefix ? l_maxPrefix : l_info->ifa_prefixlen);
++        char l_mask[16] = {0};
++        unsigned i;
++        for(i=0; i<(l_prefix/8); ++i)
++        {
++            l_mask[i] = 0xff;
++        }
++        l_mask[i] = 0xff << (8 - (l_prefix % 8));
++        
++        makeSockaddr(l_entry->ifa_addr->sa_family, (struct sockaddr *)l_addr, l_mask, l_maxPrefix / 8);
++        l_entry->ifa_netmask = (struct sockaddr *)l_addr;
++    }
++    
++    addToEnd(p_resultList, l_entry);
++}
++
++static void interpret(int p_socket, NetlinkList *p_netlinkList, struct ifaddrs **p_links, struct ifaddrs **p_resultList)
++{
++    pid_t l_pid = getpid();
++    for(; p_netlinkList; p_netlinkList = p_netlinkList->m_next)
++    {
++        unsigned int l_nlsize = p_netlinkList->m_size;
++        struct nlmsghdr *l_hdr;
++        for(l_hdr = p_netlinkList->m_data; NLMSG_OK(l_hdr, l_nlsize); l_hdr = NLMSG_NEXT(l_hdr, l_nlsize))
++        {
++            if((pid_t)l_hdr->nlmsg_pid != l_pid || (int)l_hdr->nlmsg_seq != p_socket)
++            {
++                continue;
++            }
++            
++            if(l_hdr->nlmsg_type == NLMSG_DONE)
++            {
++                break;
++            }
++            
++            if(l_hdr->nlmsg_type == RTM_NEWLINK)
++            {
++                interpretLink(l_hdr, p_links, p_resultList);
++            }
++            else if(l_hdr->nlmsg_type == RTM_NEWADDR)
++            {
++                interpretAddr(l_hdr, p_links, p_resultList);
++            }
++        }
++    }
++}
++
++static unsigned countLinks(int p_socket, NetlinkList *p_netlinkList)
++{
++    unsigned l_links = 0;
++    pid_t l_pid = getpid();
++    for(; p_netlinkList; p_netlinkList = p_netlinkList->m_next)
++    {
++        unsigned int l_nlsize = p_netlinkList->m_size;
++        struct nlmsghdr *l_hdr;
++        for(l_hdr = p_netlinkList->m_data; NLMSG_OK(l_hdr, l_nlsize); l_hdr = NLMSG_NEXT(l_hdr, l_nlsize))
++        {
++            if((pid_t)l_hdr->nlmsg_pid != l_pid || (int)l_hdr->nlmsg_seq != p_socket)
++            {
++                continue;
++            }
++            
++            if(l_hdr->nlmsg_type == NLMSG_DONE)
++            {
++                break;
++            }
++            
++            if(l_hdr->nlmsg_type == RTM_NEWLINK)
++            {
++                ++l_links;
++            }
++        }
++    }
++    
++    return l_links;
++}
++
++int getifaddrs(struct ifaddrs **ifap)
++{
++    if(!ifap)
++    {
++        return -1;
++    }
++    *ifap = NULL;
++    
++    int l_socket = netlink_socket();
++    if(l_socket < 0)
++    {
++        return -1;
++    }
++    
++    NetlinkList *l_linkResults = getResultList(l_socket, RTM_GETLINK);
++    if(!l_linkResults)
++    {
++        close(l_socket);
++        return -1;
++    }
++    
++    NetlinkList *l_addrResults = getResultList(l_socket, RTM_GETADDR);
++    if(!l_addrResults)
++    {
++        close(l_socket);
++        freeResultList(l_linkResults);
++        return -1;
++    }
++    
++    unsigned l_numLinks = countLinks(l_socket, l_linkResults) + countLinks(l_socket, l_addrResults);
++    struct ifaddrs *l_links[l_numLinks];
++    memset(l_links, 0, l_numLinks * sizeof(struct ifaddrs *));
++    
++    interpret(l_socket, l_linkResults, l_links, ifap);
++    interpret(l_socket, l_addrResults, l_links, ifap);
++
++    freeResultList(l_linkResults);
++    freeResultList(l_addrResults);
++    close(l_socket);
++    return 0;
++}
++
++void freeifaddrs(struct ifaddrs *ifa)
++{
++    struct ifaddrs *l_cur;
++    while(ifa)
++    {
++        l_cur = ifa;
++        ifa = ifa->ifa_next;
++        free(l_cur);
++    }
++}
+diff --git a/hotspot/src/os/linux/vm/jvm_linux.cpp b/hotspot/src/os/linux/vm/jvm_linux.cpp
+index ba84788a..a63fc148 100644
+--- a/hotspot/src/os/linux/vm/jvm_linux.cpp
++++ b/hotspot/src/os/linux/vm/jvm_linux.cpp
+@@ -153,6 +153,9 @@ struct siglabel siglabels[] = {
+   "TERM",       SIGTERM,        /* Termination (ANSI).  */
+ #ifdef SIGSTKFLT
+   "STKFLT",     SIGSTKFLT,      /* Stack fault.  */
++#endif
++#ifndef SIGCLD
++#define SIGCLD SIGCHLD
+ #endif
+   "CLD",        SIGCLD,         /* Same as SIGCHLD (System V).  */
+   "CHLD",       SIGCHLD,        /* Child status has changed (POSIX).  */
+diff --git a/hotspot/src/os/linux/vm/os_linux.cpp b/hotspot/src/os/linux/vm/os_linux.cpp
+index 2d3880b3..2c41d82f 100644
+--- a/hotspot/src/os/linux/vm/os_linux.cpp
++++ b/hotspot/src/os/linux/vm/os_linux.cpp
+@@ -95,7 +95,55 @@
+ # include <string.h>
+ # include <syscall.h>
+ # include <sys/sysinfo.h>
++# ifndef __ANDROID__
+ # include <gnu/libc-version.h>
++# else
++// Copy from glibc 2.31
++
++# ifndef _CS_GNU_LIBC_VERSION
++# define _CS_GNU_LIBC_VERSION 2
++# endif
++# ifndef _CS_GNU_LIBPTHREAD_VERSION
++# define _CS_GNU_LIBPTHREAD_VERSION 3
++# endif
++
++static size_t confstr(int name, char *buf, size_t len) {
++  const char *string = "";
++  size_t string_len = 1;
++
++  switch (name) {
++    case _CS_GNU_LIBC_VERSION:
++      string = "bionic libc android-21";
++      string_len = sizeof("bionic libc android-21");
++      break;
++
++    case _CS_GNU_LIBPTHREAD_VERSION:
++      string = "bionic libc android-21 NPTL";
++      string_len = sizeof("bionic libc android-21 NPTL");
++      break;
++    default:
++      return 0;
++  }
++
++  if (len > 0 && buf != NULL) {
++    if (string_len <= len) {
++      memcpy (buf, string, string_len);
++    } else {
++      memcpy (buf, string, len - 1);
++      buf[len - 1] = '\0';
++    }
++  }
++  return string_len;
++}
++
++static const char* gnu_get_libc_version() {
++  return "0";
++}
++
++static const char* gnu_get_libc_release() {
++  return "0";
++}
++# endif // __ANDROID__
+ # include <sys/ipc.h>
+ # include <sys/shm.h>
+ # include <link.h>
+@@ -1380,9 +1428,9 @@ jlong os::javaTimeMillis() {
+ void os::Linux::clock_init() {
+   // we do dlopen's in this particular order due to bug in linux
+   // dynamical loader (see 6348968) leading to crash on exit
+-  void* handle = dlopen("librt.so.1", RTLD_LAZY);
++  void* handle = dlopen("libc.so.6", RTLD_LAZY);
+   if (handle == NULL) {
+-    handle = dlopen("librt.so", RTLD_LAZY);
++    handle = dlopen("libc.so", RTLD_LAZY);
+   }
+ 
+   if (handle) {
+@@ -2977,7 +3025,11 @@ extern "C" JNIEXPORT int fork1() { return fork(); }
+ // Handle request to load libnuma symbol version 1.1 (API v1). If it fails
+ // load symbol from base version instead.
+ void* os::Linux::libnuma_dlsym(void* handle, const char *name) {
++#ifndef __ANDROID__
+   void *f = dlvsym(handle, name, "libnuma_1.1");
++#else
++  void *f = NULL;
++#endif
+   if (f == NULL) {
+     f = dlsym(handle, name);
+   }
+@@ -2987,7 +3039,11 @@ void* os::Linux::libnuma_dlsym(void* handle, const char *name) {
+ // Handle request to load libnuma symbol version 1.2 (API v2) only.
+ // Return NULL if the symbol is not defined in this particular version.
+ void* os::Linux::libnuma_v2_dlsym(void* handle, const char* name) {
++#ifndef __ANDROID__
+   return dlvsym(handle, name, "libnuma_1.2");
++#else
++  return NULL;
++#endif
+ }
+ 
+ bool os::Linux::libnuma_init() {
+@@ -5867,7 +5923,11 @@ bool os::is_thread_cpu_time_supported() {
+ // Linux doesn't yet have a (official) notion of processor sets,
+ // so just return the system wide load average.
+ int os::loadavg(double loadavg[], int nelem) {
++#ifndef __ANDROID__
+   return ::getloadavg(loadavg, nelem);
++#else
++  return -1;
++#endif
+ }
+ 
+ void os::pause() {
+diff --git a/hotspot/src/os/linux/vm/os_perf_linux.cpp b/hotspot/src/os/linux/vm/os_perf_linux.cpp
+index 0d1f7581..61e66eb7 100644
+--- a/hotspot/src/os/linux/vm/os_perf_linux.cpp
++++ b/hotspot/src/os/linux/vm/os_perf_linux.cpp
+@@ -65,6 +65,9 @@
+ #include <pthread.h>
+ #include <limits.h>
+ #include <ifaddrs.h>
++#ifdef __ANDROID__
++#include "ifaddrs.inc.h"
++#endif
+ #include <fcntl.h>
+ 
+ /**
+diff --git a/hotspot/src/os_cpu/linux_aarch64/vm/os_linux_aarch64.cpp b/hotspot/src/os_cpu/linux_aarch64/vm/os_linux_aarch64.cpp
+index 82e36d27..8c4784b8 100644
+--- a/hotspot/src/os_cpu/linux_aarch64/vm/os_linux_aarch64.cpp
++++ b/hotspot/src/os_cpu/linux_aarch64/vm/os_linux_aarch64.cpp
+@@ -72,7 +72,9 @@
+ # include <pwd.h>
+ # include <poll.h>
+ # include <ucontext.h>
++# ifndef __ANDROID__
+ # include <fpu_control.h>
++# endif
+ 
+ #define REG_FP 29
+ 
+diff --git a/hotspot/src/share/vm/utilities/elfFile.hpp b/hotspot/src/share/vm/utilities/elfFile.hpp
+index 3ce8e92c..dad3d70a 100644
+--- a/hotspot/src/share/vm/utilities/elfFile.hpp
++++ b/hotspot/src/share/vm/utilities/elfFile.hpp
+@@ -46,7 +46,7 @@ typedef Elf64_Shdr      Elf_Shdr;
+ typedef Elf64_Phdr      Elf_Phdr;
+ typedef Elf64_Sym       Elf_Sym;
+ 
+-#if !defined(_ALLBSD_SOURCE) || defined(__APPLE__)
++#if !(defined(_ALLBSD_SOURCE) || defined(__ANDROID__)) || defined(__APPLE__)
+ #define ELF_ST_TYPE ELF64_ST_TYPE
+ #endif
+ 
+@@ -63,7 +63,7 @@ typedef Elf32_Shdr      Elf_Shdr;
+ typedef Elf32_Phdr      Elf_Phdr;
+ typedef Elf32_Sym       Elf_Sym;
+ 
+-#if !defined(_ALLBSD_SOURCE) || defined(__APPLE__)
++#if !(defined(_ALLBSD_SOURCE) || defined(__ANDROID__)) || defined(__APPLE__)
+ #define ELF_ST_TYPE ELF32_ST_TYPE
+ #endif
+ #endif
+diff --git a/jdk/make/CompileDemos.gmk b/jdk/make/CompileDemos.gmk
+index 6c5eb432..c3b3c254 100644
+--- a/jdk/make/CompileDemos.gmk
++++ b/jdk/make/CompileDemos.gmk
+@@ -323,7 +323,7 @@ endif
+ $(eval $(call SetupJVMTIDemo,hprof, java_crw_demo, \
+     -I$(JDK_TOPDIR)/src/share/npt -I$(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/npt \
+     $(BUILD_LIBHPROF_AIX_EXTRA_CFLAGS), C, \
+-    -ldl, ws2_32.lib winmm.lib, -lsocket -lnsl, -lpthread, $(BUILD_LIBHPROF_AIX_EXTRA_SRC)))
++    -ldl, ws2_32.lib winmm.lib, -lsocket -lnsl, -pthread, $(BUILD_LIBHPROF_AIX_EXTRA_SRC)))
+ 
+ $(eval $(call SetupJVMTIDemo,minst, agent_util java_crw_demo))
+ $(eval $(call SetupJVMTIDemo,mtrace, agent_util java_crw_demo))
+diff --git a/jdk/make/CompileLaunchers.gmk b/jdk/make/CompileLaunchers.gmk
+index 1f414e2e..a61f8b4f 100644
+--- a/jdk/make/CompileLaunchers.gmk
++++ b/jdk/make/CompileLaunchers.gmk
+@@ -168,7 +168,7 @@ define SetupLauncher
+           $(ORIGIN_ARG) \
+           $$($1_LDFLAGS), \
+       LDFLAGS_macosx := $(call SET_SHARED_LIBRARY_NAME,$1), \
+-      LDFLAGS_linux := -lpthread \
++      LDFLAGS_linux := -pthread \
+           $(call SET_SHARED_LIBRARY_NAME,$(LIBRARY_PREFIX)$(SHARED_LIBRARY_SUFFIX)), \
+       LDFLAGS_solaris := $$($1_LDFLAGS_solaris) \
+           $(call SET_SHARED_LIBRARY_NAME,$(LIBRARY_PREFIX)$(SHARED_LIBRARY_SUFFIX)), \
+diff --git a/jdk/make/lib/Awt2dLibraries.gmk b/jdk/make/lib/Awt2dLibraries.gmk
+index 9368a9d5..6f080a3c 100644
+--- a/jdk/make/lib/Awt2dLibraries.gmk
++++ b/jdk/make/lib/Awt2dLibraries.gmk
+@@ -621,7 +621,7 @@ ifeq ($(findstring $(OPENJDK_TARGET_OS),windows macosx),)
+ 
+     ifeq ($(OPENJDK_TARGET_OS), linux)
+       # To match old build, add this to LDFLAGS instead of suffix.
+-      LIBAWT_XAWT_LDFLAGS += -lpthread
++      LIBAWT_XAWT_LDFLAGS += -pthread
+     endif
+ 
+     $(eval $(call SetupNativeCompilation,BUILD_LIBAWT_XAWT, \
+@@ -924,7 +924,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBFONTMANAGER, \
+         $(subst -Wl$(COMMA)-z$(COMMA)defs,,$(LDFLAGS_JDKLIB))) $(LDFLAGS_CXX_JDK) \
+         $(call SET_SHARED_LIBRARY_ORIGIN), \
+     LDFLAGS_SUFFIX := $(BUILD_LIBFONTMANAGER_FONTLIB), \
+-    LDFLAGS_SUFFIX_linux := -lawt $(LIBM) $(LIBCXX) -ljava -ljvm -lc, \
++    LDFLAGS_SUFFIX_linux := -lawt -lawt_xawt $(LIBM) $(LIBCXX) -ljava -ljvm -lc, \
+     LDFLAGS_SUFFIX_solaris := -lawt -lawt_headless -lc $(LIBM) $(LIBCXX) -ljava -ljvm, \
+     LDFLAGS_SUFFIX_aix := -lawt -lawt_headless $(LIBM) $(LIBCXX) -ljava -ljvm,\
+     LDFLAGS_SUFFIX_macosx := -lawt $(LIBM) $(LIBCXX) -undefined dynamic_lookup \
+@@ -1195,7 +1195,7 @@ ifndef BUILD_HEADLESS_ONLY
+   else ifeq ($(OPENJDK_TARGET_OS), windows)
+     LIBSPLASHSCREEN_LDFLAGS_SUFFIX += kernel32.lib user32.lib gdi32.lib delayimp.lib -DELAYLOAD:user32.dll
+   else
+-    LIBSPLASHSCREEN_LDFLAGS_SUFFIX += $(X_LIBS) -lX11 -lXext $(LIBM) -lpthread
++    LIBSPLASHSCREEN_LDFLAGS_SUFFIX += $(X_LIBS) -lX11 -lXext $(LIBM) -pthread
+   endif
+ 
+   $(eval $(call SetupNativeCompilation,LIBSPLASHSCREEN, \
+@@ -1211,6 +1211,7 @@ ifndef BUILD_HEADLESS_ONLY
+           $(call SET_SHARED_LIBRARY_ORIGIN), \
+       LDFLAGS_SUFFIX := $(LIBSPLASHSCREEN_LDFLAGS_SUFFIX) $(LIBZ) $(GIFLIB_LDFLAGS), \
+       LDFLAGS_SUFFIX_solaris := -lc, \
++      LDFLAGS_SUFFIX_linux := -liconv, \
+       VERSIONINFO_RESOURCE := $(JDK_TOPDIR)/src/windows/resource/version.rc, \
+       RC_FLAGS := $(RC_FLAGS) \
+           -D "JDK_FNAME=splashscreen.dll" \
+diff --git a/jdk/make/lib/CoreLibraries.gmk b/jdk/make/lib/CoreLibraries.gmk
+index 54bf729f..e0ae289e 100644
+--- a/jdk/make/lib/CoreLibraries.gmk
++++ b/jdk/make/lib/CoreLibraries.gmk
+@@ -445,7 +445,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBJLI, \
+     LDFLAGS_solaris := $(call SET_SHARED_LIBRARY_ORIGIN,/..), \
+     LDFLAGS_macosx := -framework Cocoa -framework Security -framework ApplicationServices -mmacosx-version-min=$(MACOSX_VERSION_MIN), \
+     LDFLAGS_SUFFIX_solaris := $(LIBZ) $(LIBDL) -lc, \
+-    LDFLAGS_SUFFIX_linux := $(LIBZ) $(LIBDL) -lc -lpthread, \
++    LDFLAGS_SUFFIX_linux := $(LIBZ) $(LIBDL) -lc -pthread, \
+     LDFLAGS_SUFFIX_aix := $(LIBZ) $(LIBDL),\
+     LDFLAGS_SUFFIX_macosx := $(LIBZ), \
+     LDFLAGS_SUFFIX_windows := \
+@@ -547,6 +547,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBNPT, \
+     LDFLAGS_macosx := -liconv, \
+     LDFLAGS_SUFFIX_windows := -export:nptInitialize -export:nptTerminate, \
+     LDFLAGS_SUFFIX_solaris := -lc, \
++    LDFLAGS_SUFFIX_linux := -liconv, \
+     VERSIONINFO_RESOURCE := $(JDK_TOPDIR)/src/windows/resource/version.rc, \
+     RC_FLAGS := $(RC_FLAGS) \
+         -D "JDK_FNAME=npt.dll" \
+diff --git a/jdk/make/lib/NetworkingLibraries.gmk b/jdk/make/lib/NetworkingLibraries.gmk
+index 347c3237..c89e54db 100644
+--- a/jdk/make/lib/NetworkingLibraries.gmk
++++ b/jdk/make/lib/NetworkingLibraries.gmk
+@@ -72,7 +72,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBNET, \
+         $(call SET_SHARED_LIBRARY_ORIGIN), \
+     LDFLAGS_SUFFIX_macosx := -ljvm -ljava, \
+     LDFLAGS_SUFFIX_solaris := -ljvm -ljava -lnsl -lsocket $(LIBDL) -lc, \
+-    LDFLAGS_SUFFIX_linux := $(LIBDL) -ljvm -lpthread -ljava, \
++    LDFLAGS_SUFFIX_linux := $(LIBDL) -ljvm -pthread -ljava, \
+     LDFLAGS_SUFFIX_aix := $(LIBDL) -ljvm -ljava,\
+     LDFLAGS_SUFFIX_windows := ws2_32.lib jvm.lib secur32.lib iphlpapi.lib \
+         delayimp.lib $(WIN_JAVA_LIB) advapi32.lib \
+diff --git a/jdk/make/lib/NioLibraries.gmk b/jdk/make/lib/NioLibraries.gmk
+index 6c9c46a3..e241abed 100644
+--- a/jdk/make/lib/NioLibraries.gmk
++++ b/jdk/make/lib/NioLibraries.gmk
+@@ -142,7 +142,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBNIO, \
+     MAPFILE := $(BUILD_LIBNIO_MAPFILE), \
+     LDFLAGS := $(LDFLAGS_JDKLIB) $(BUILD_LIBNIO_LDFLAGS) \
+         $(call SET_SHARED_LIBRARY_ORIGIN), \
+-    LDFLAGS_SUFFIX_linux := -ljava -lnet -lpthread $(LIBDL), \
++    LDFLAGS_SUFFIX_linux := -ljava -lnet -pthread $(LIBDL), \
+     LDFLAGS_SUFFIX_aix := -ljava -lnet $(LIBDL),\
+     LDFLAGS_SUFFIX_solaris := -ljvm -lsocket -lposix4 $(LIBDL) \
+         -lsendfile -ljava -lnet -lc, \
+@@ -191,7 +191,7 @@ ifeq ($(OPENJDK_TARGET_OS_API), posix)
+         MAPFILE := $(JDK_TOPDIR)/make/mapfiles/libsctp/mapfile-vers, \
+         LDFLAGS := $(LDFLAGS_JDKLIB) \
+             $(call SET_SHARED_LIBRARY_ORIGIN), \
+-        LDFLAGS_SUFFIX_linux := -lpthread $(LIBDL) -ljava -ljvm, \
++        LDFLAGS_SUFFIX_linux := -pthread $(LIBDL) -ljava -ljvm, \
+         LDFLAGS_SUFFIX_posix := -lnio -lnet, \
+         LDFLAGS_SUFFIX_solaris := -lsocket -ljava -ljvm -lc, \
+         LDFLAGS_SUFFIX_macosx := -ljava -ljvm, \
+diff --git a/jdk/make/lib/ServiceabilityLibraries.gmk b/jdk/make/lib/ServiceabilityLibraries.gmk
+index c951b118..0499e07b 100644
+--- a/jdk/make/lib/ServiceabilityLibraries.gmk
++++ b/jdk/make/lib/ServiceabilityLibraries.gmk
+@@ -92,7 +92,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBDT_SOCKET, \
+     MAPFILE := $(JDK_TOPDIR)/make/mapfiles/libdt_socket/mapfile-vers, \
+     LDFLAGS := $(LDFLAGS_JDKLIB) \
+         $(call SET_SHARED_LIBRARY_ORIGIN), \
+-    LDFLAGS_SUFFIX_linux := -lpthread, \
++    LDFLAGS_SUFFIX_linux := -pthread, \
+     LDFLAGS_SUFFIX_solaris := -lnsl -lsocket -lc, \
+     LDFLAGS_SUFFIX_windows := $(LDFLAGS_JDKLIB_SUFFIX) -export:jdwpTransport_OnLoad ws2_32.lib, \
+     VERSIONINFO_RESOURCE := $(JDK_TOPDIR)/src/windows/resource/version.rc, \
+@@ -266,7 +266,7 @@ $(eval $(call SetupNativeCompilation,BUILD_LIBINSTRUMENT, \
+     LDFLAGS_SUFFIX := $(LIBINSTRUMENT_LDFLAGS_SUFFIX), \
+     LDFLAGS_SUFFIX_macosx := -liconv $(LIBZ), \
+     LDFLAGS_SUFFIX_solaris := $(LIBZ) -L $(INSTALL_LIBRARIES_HERE)/jli -ljli $(LIBDL) -lc, \
+-    LDFLAGS_SUFFIX_linux := $(LIBZ) -L $(INSTALL_LIBRARIES_HERE)/jli -ljli $(LIBDL), \
++    LDFLAGS_SUFFIX_linux := -liconv $(LIBZ) -L $(INSTALL_LIBRARIES_HERE)/jli -ljli $(LIBDL), \
+     LDFLAGS_SUFFIX_aix := $(LIBZ) -L$(JDK_OUTPUTDIR)/objs -ljli_static $(LIBDL),\
+     VERSIONINFO_RESOURCE := $(JDK_TOPDIR)/src/windows/resource/version.rc, \
+     RC_FLAGS := $(RC_FLAGS) \
+diff --git a/jdk/src/solaris/bin/java_md_common.c b/jdk/src/solaris/bin/java_md_common.c
+index fb446db7..b9edd63e 100644
+--- a/jdk/src/solaris/bin/java_md_common.c
++++ b/jdk/src/solaris/bin/java_md_common.c
+@@ -31,6 +31,14 @@
+ jboolean
+ GetApplicationHome(char *buf, jint bufsize)
+ {
++#ifdef __ANDROID__
++    char* java_home_var = getenv("JAVA_HOME");
++    if (java_home_var != NULL){
++        JLI_Snprintf(buf, bufsize, "%s", java_home_var);
++        buf[bufsize-1] = '\0';
++        return JNI_TRUE;
++    }
++#endif
+     const char *execname = GetExecName();
+     if (execname != NULL) {
+         JLI_Snprintf(buf, bufsize, "%s", execname);
+diff --git a/jdk/src/solaris/native/common/jni_util_md.c b/jdk/src/solaris/native/common/jni_util_md.c
+index 598dc41e..24c72382 100644
+--- a/jdk/src/solaris/native/common/jni_util_md.c
++++ b/jdk/src/solaris/native/common/jni_util_md.c
+@@ -40,9 +40,11 @@ char* nativeGetStringPlatformChars(JNIEnv *env, jstring jstr, jboolean *isCopy)
+ #if defined(LINUX) && (defined(_GNU_SOURCE) || \
+          (defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE < 200112L \
+              && defined(_XOPEN_SOURCE) && _XOPEN_SOURCE < 600))
++#ifndef __ANDROID__
+ extern int __xpg_strerror_r(int, char *, size_t);
+ #define strerror_r(a, b, c) __xpg_strerror_r((a), (b), (c))
+ #endif
++#endif
+ 
+ void* getProcessHandle() {
+     static void *procHandle = NULL;
+diff --git a/jdk/src/solaris/native/java/io/UnixFileSystem_md.c b/jdk/src/solaris/native/java/io/UnixFileSystem_md.c
+index 225e23f8..295b3750 100644
+--- a/jdk/src/solaris/native/java/io/UnixFileSystem_md.c
++++ b/jdk/src/solaris/native/java/io/UnixFileSystem_md.c
+@@ -209,8 +209,8 @@ Java_java_io_UnixFileSystem_getLastModifiedTime(JNIEnv *env, jobject this,
+         struct stat64 sb;
+         if (stat64(path, &sb) == 0) {
+ #ifndef MACOSX
+-            rv  = (jlong)sb.st_mtim.tv_sec * 1000;
+-            rv += (jlong)sb.st_mtim.tv_nsec / 1000000;
++            rv  = (jlong)sb.st_mtime * 1000;
++            rv += (jlong)sb.st_mtimensec / 1000000;
+ #else
+             rv  = (jlong)sb.st_mtimespec.tv_sec * 1000;
+             rv += (jlong)sb.st_mtimespec.tv_nsec / 1000000;
+@@ -399,8 +399,8 @@ Java_java_io_UnixFileSystem_setLastModifiedTime(JNIEnv *env, jobject this,
+ 
+             /* Preserve access time */
+ #ifndef MACOSX
+-            tv[0].tv_sec = sb.st_atim.tv_sec;
+-            tv[0].tv_usec = sb.st_atim.tv_nsec / 1000;
++            tv[0].tv_sec = sb.st_atime;
++            tv[0].tv_usec = sb.st_atimensec / 1000;
+ #else
+             tv[0].tv_sec = sb.st_atimespec.tv_sec;
+             tv[0].tv_usec = sb.st_atimespec.tv_nsec / 1000;
+diff --git a/jdk/src/solaris/native/java/net/net_util_md.c b/jdk/src/solaris/native/java/net/net_util_md.c
+index bd0bd8c2..8d4713b0 100644
+--- a/jdk/src/solaris/native/java/net/net_util_md.c
++++ b/jdk/src/solaris/native/java/net/net_util_md.c
+@@ -35,12 +35,14 @@
+ #include <dlfcn.h>
+ #include <sys/time.h>
+ 
+-#ifndef _ALLBSD_SOURCE
++#if !defined(_ALLBSD_SOURCE) && !defined(__ANDROID__)
+ #include <values.h>
+ #else
+ #include <limits.h>
+ #include <sys/param.h>
++#ifndef __ANDROID__
+ #include <sys/sysctl.h>
++#endif
+ #ifndef MAXINT
+ #define MAXINT INT_MAX
+ #endif
+diff --git a/jdk/src/solaris/native/sun/nio/ch/Net.c b/jdk/src/solaris/native/sun/nio/ch/Net.c
+index 73560ad6..d0853243 100644
+--- a/jdk/src/solaris/native/sun/nio/ch/Net.c
++++ b/jdk/src/solaris/native/sun/nio/ch/Net.c
+@@ -55,7 +55,7 @@
+   #endif
+ #endif
+ 
+-#if defined(_ALLBSD_SOURCE) || defined(_AIX)
++#if defined(_ALLBSD_SOURCE) || defined(_AIX) || defined(__ANDROID__)
+ 
+ #ifndef IP_BLOCK_SOURCE
+ 
+diff --git a/jdk/src/solaris/native/sun/nio/fs/UnixNativeDispatcher.c b/jdk/src/solaris/native/sun/nio/fs/UnixNativeDispatcher.c
+index cb4cfc01..bc4cd63c 100644
+--- a/jdk/src/solaris/native/sun/nio/fs/UnixNativeDispatcher.c
++++ b/jdk/src/solaris/native/sun/nio/fs/UnixNativeDispatcher.c
+@@ -1020,6 +1020,40 @@ Java_sun_nio_fs_UnixNativeDispatcher_getpwuid(JNIEnv* env, jclass this, jint uid
+     return result;
+ }
+ 
++#ifdef __ANDROID__
++/*
++ * TODO: Android lacks support for the methods listed below.  In it's place are
++ * alternatives that use existing Android functionality, but lack reentrant
++ * support.  Determine if the following are the most suitable alternatives.
++ *
++ */
++int getgrgid_r(gid_t gid, struct group* grp, char* buf, size_t buflen, struct group** result) {
++
++  *result = NULL;
++  errno = 0;
++  grp = getgrgid(gid);
++  if (grp == NULL) {
++        return errno;
++  }
++  // buf not used by caller (see below)
++  *result = grp;
++  return 0;
++}
++
++int getgrnam_r(const char *name, struct group* grp, char* buf, size_t buflen, struct group** result) {
++
++  *result = NULL;
++  errno = 0;
++  grp = getgrnam(name);
++  if (grp == NULL) {
++        return errno;
++  }
++  // buf not used by caller (see below)
++  *result = grp;
++  return 0;
++
++}
++#endif // __ANDROID__
+ 
+ JNIEXPORT jbyteArray JNICALL
+ Java_sun_nio_fs_UnixNativeDispatcher_getgrgid(JNIEnv* env, jclass this, jint gid)
+diff --git a/jdk/src/solaris/native/sun/tools/attach/LinuxVirtualMachine.c b/jdk/src/solaris/native/sun/tools/attach/LinuxVirtualMachine.c
+index 6017308d..399054bc 100644
+--- a/jdk/src/solaris/native/sun/tools/attach/LinuxVirtualMachine.c
++++ b/jdk/src/solaris/native/sun/tools/attach/LinuxVirtualMachine.c
+@@ -187,6 +187,46 @@ JNIEXPORT void JNICALL Java_sun_tools_attach_LinuxVirtualMachine_connect
+     }
+ }
+ 
++#ifdef __ANDROID__
++// Copy from glibc 2.31
++
++# ifndef _CS_GNU_LIBC_VERSION
++# define _CS_GNU_LIBC_VERSION 2
++# endif
++# ifndef _CS_GNU_LIBPTHREAD_VERSION
++# define _CS_GNU_LIBPTHREAD_VERSION 3
++# endif
++
++static size_t confstr(int name, char *buf, size_t len) {
++  const char *string = "";
++  size_t string_len = 1;
++
++  switch (name) {
++    case _CS_GNU_LIBC_VERSION:
++      string = "bionic libc android-21";
++      string_len = sizeof("bionic libc android-21");
++      break;
++
++    case _CS_GNU_LIBPTHREAD_VERSION:
++      string = "bionic libc android-21 NPTL";
++      string_len = sizeof("bionic libc android-21 NPTL");
++      break;
++    default:
++      return 0;
++  }
++
++  if (len > 0 && buf != NULL) {
++    if (string_len <= len) {
++      memcpy (buf, string, string_len);
++    } else {
++      memcpy (buf, string, len - 1);
++      buf[len - 1] = '\0';
++    }
++  }
++  return string_len;
++}
++#endif
++
+ /*
+  * Class:     sun_tools_attach_LinuxVirtualMachine
+  * Method:    isLinuxThreads
+diff --git a/jdk/src/solaris/native/sun/xawt/XToolkit.c b/jdk/src/solaris/native/sun/xawt/XToolkit.c
+index 24557cba..436d8f90 100644
+--- a/jdk/src/solaris/native/sun/xawt/XToolkit.c
++++ b/jdk/src/solaris/native/sun/xawt/XToolkit.c
+@@ -27,7 +27,7 @@
+ #include <X11/Xutil.h>
+ #include <X11/Xos.h>
+ #include <X11/Xatom.h>
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ #include <execinfo.h>
+ #endif
+ 
+@@ -799,6 +799,7 @@ JNIEXPORT jstring JNICALL Java_sun_awt_X11_XToolkit_getEnv
+ #ifdef __linux__
+ void print_stack(void)
+ {
++#ifndef __ANDROID__
+   void *array[10];
+   size_t size;
+   char **strings;
+@@ -813,6 +814,7 @@ void print_stack(void)
+      fprintf (stderr, "%s\n", strings[i]);
+ 
+   free (strings);
++#endif
+ }
+ #endif
+ 

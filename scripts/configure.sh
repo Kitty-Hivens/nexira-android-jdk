@@ -18,6 +18,10 @@ if [ "$MAJOR" -lt 25 ]; then
   [ -e "$XINC/X11/Intrinsic.h" ] || : > "$XINC/X11/Intrinsic.h"
   X11_ARGS=(--x-includes="$XINC" --x-libraries="$STUBS")
 fi
+# 17 and 8 do not ask for X11 in a headless build, but the headless AWT library still includes its headers.
+if [ "$MAJOR" -le 17 ]; then X11_ARGS+=(--with-extra-cflags="-I$XINC" --with-extra-cxxflags="-I$XINC"); fi
+# 8u does not make its native libraries position independent on its own, which a shared library needs.
+if [ "$MAJOR" = 8 ]; then X11_ARGS=(--x-includes="$XINC" --x-libraries="$STUBS" --with-extra-cflags="-I$XINC -fPIC" --with-extra-cxxflags="-I$XINC -fPIC"); fi
 
 # The cups, fontconfig and alsa headers are only read, but pointing the build at all of /usr/include
 # puts the host's C library headers ahead of the NDK sysroot's in every file of the desktop libraries.
@@ -28,6 +32,36 @@ if [ "$MAJOR" -lt 25 ]; then
   INCLUDES=$HOSTINC
 else
   INCLUDES=/usr/include
+fi
+
+if [ "$MAJOR" = 8 ]; then
+  "$(dirname "$0")/freetype.sh" 8
+  FT=$WORK/freetype-android
+  cd "$SRC"
+  # 8u calls the headless switch --disable-headful, takes its zlib and giflib from the source tree
+  # and has no flags for the other bundled libraries. lld refuses a version script that names a symbol the
+  # library no longer defines, where the GNU linker skips it, and the 8u scripts have several. Its version string is set in pieces.
+  JAVA_HOME= bash configure "${X11_ARGS[@]}" \
+    --with-conf-name=$CONF \
+    --openjdk-target=aarch64-linux-android \
+    --with-toolchain-type=clang \
+    --with-boot-jdk="$BOOT" \
+    --with-jvm-variants=server \
+    --with-debug-level=release \
+    --with-user-release-suffix=nexira.android \
+    --disable-headful \
+    --with-sysroot="$LLVM/sysroot" \
+    --with-toolchain-path="$LLVM/bin" \
+    --with-freetype-include="$FT/include/freetype2" --with-freetype-lib="$FT/lib" \
+    --with-zlib=bundled --with-giflib=bundled \
+    --with-cups-include="$INCLUDES" --with-fontconfig-include="$INCLUDES" --with-alsa-include="$INCLUDES" \
+    --with-extra-ldflags="-L$STUBS -Wl,--undefined-version" \
+    CC="$LLVM/bin/aarch64-linux-android28-clang" CXX="$LLVM/bin/aarch64-linux-android28-clang++" \
+    AR="$LLVM/bin/llvm-ar" NM="$LLVM/bin/llvm-nm" OBJCOPY="$LLVM/bin/llvm-objcopy" OBJDUMP="$LLVM/bin/llvm-objdump" \
+    STRIP="$LLVM/bin/llvm-strip" \
+    BUILD_CC=/usr/bin/clang BUILD_CXX=/usr/bin/clang++ BUILD_NM=/usr/bin/llvm-nm BUILD_AR=/usr/bin/llvm-ar \
+    --with-jobs="${JOBS:-$(nproc)}"
+  exit
 fi
 
 cd "$SRC"

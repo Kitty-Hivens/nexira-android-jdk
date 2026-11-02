@@ -1,0 +1,42 @@
+Subject: [PATCH] nexira: do not build the serviceability agent library on aarch64
+
+Its sources need register structures bionic does not declare, and nothing in the embedded VM loads it.
+
+---
+diff --git a/hotspot/make/linux/makefiles/defs.make b/hotspot/make/linux/makefiles/defs.make
+index ec414639..1ad9820d 100644
+--- a/hotspot/make/linux/makefiles/defs.make
++++ b/hotspot/make/linux/makefiles/defs.make
+@@ -309,18 +309,15 @@ ADD_SA_BINARIES/x86   = $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.$(LIBRARY_SUFFIX) \
+                         $(EXPORT_LIB_DIR)/sa-jdi.jar
+ ADD_SA_BINARIES/sparc = $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.$(LIBRARY_SUFFIX) \
+                         $(EXPORT_LIB_DIR)/sa-jdi.jar
+-ADD_SA_BINARIES/aarch64 = $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.$(LIBRARY_SUFFIX) \
+-                        $(EXPORT_LIB_DIR)/sa-jdi.jar
++ADD_SA_BINARIES/aarch64 = $(EXPORT_LIB_DIR)/sa-jdi.jar
+ ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
+   ifneq ($(STRIP_POLICY),no_strip)
+     ifeq ($(ZIP_DEBUGINFO_FILES),1)
+       ADD_SA_BINARIES/x86     += $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.diz
+       ADD_SA_BINARIES/sparc   += $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.diz
+-      ADD_SA_BINARIES/aarch64 += $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.diz
+     else
+       ADD_SA_BINARIES/x86     += $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.debuginfo
+       ADD_SA_BINARIES/sparc   += $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.debuginfo
+-      ADD_SA_BINARIES/aarch64 += $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.debuginfo
+     endif
+   endif
+ endif
+diff --git a/hotspot/make/linux/makefiles/saproc.make b/hotspot/make/linux/makefiles/saproc.make
+index 01db60e8..a8fcd7d6 100644
+--- a/hotspot/make/linux/makefiles/saproc.make
++++ b/hotspot/make/linux/makefiles/saproc.make
+@@ -68,7 +68,7 @@ endif
+ # also, we don't build SA on Itanium or zero.
+ 
+ ifneq ($(wildcard $(AGENT_DIR)),)
+-ifneq ($(filter-out ia64 zero,$(SRCARCH)),)
++ifneq ($(filter-out ia64 zero aarch64,$(SRCARCH)),)
+   BUILDLIBSAPROC = $(LIBSAPROC)
+ endif
+ endif

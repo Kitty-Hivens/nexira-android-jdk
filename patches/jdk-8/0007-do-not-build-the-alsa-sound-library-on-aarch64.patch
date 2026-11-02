@@ -1,0 +1,20 @@
+Subject: [PATCH] nexira: do not build the ALSA sound library on aarch64
+
+Android has no ALSA to link, and sound goes through the application.
+
+---
+diff --git a/jdk/make/lib/SoundLibraries.gmk b/jdk/make/lib/SoundLibraries.gmk
+index b59a9462..268a7dad 100644
+--- a/jdk/make/lib/SoundLibraries.gmk
++++ b/jdk/make/lib/SoundLibraries.gmk
+@@ -67,7 +67,9 @@ ifeq ($(OPENJDK_TARGET_OS), windows)
+ endif # OPENJDK_TARGET_OS windows
+ 
+ ifeq ($(OPENJDK_TARGET_OS), linux)
+-  EXTRA_SOUND_JNI_LIBS += jsoundalsa
++  ifneq ($(OPENJDK_TARGET_CPU), aarch64)
++    EXTRA_SOUND_JNI_LIBS += jsoundalsa
++  endif
+   LIBJSOUND_CFLAGS += -DX_PLATFORM=X_LINUX
+ endif # OPENJDK_TARGET_OS linux
+ 

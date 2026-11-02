@@ -1,0 +1,42 @@
+Subject: [PATCH] nexira: export only symbols the VM defines globally
+
+lld refuses a version script naming a symbol that is not defined, where the GNU linker skips it. The vtable of a class local to a function cannot be exported, and the stack slack helper is not defined on this port.
+
+---
+diff --git a/hotspot/make/linux/makefiles/mapfile-vers-debug b/hotspot/make/linux/makefiles/mapfile-vers-debug
+index 72c4077f..5eff51a2 100644
+--- a/hotspot/make/linux/makefiles/mapfile-vers-debug
++++ b/hotspot/make/linux/makefiles/mapfile-vers-debug
+@@ -267,7 +267,6 @@ SUNWprivate_1.1 {
+                 numa_error;
+ 
+                 # Needed because there is no JVM interface for this.
+-                sysThreadAvailableStackWithSlack;
+ 
+                 # This is for Forte Analyzer profiling support.
+                 AsyncGetCallTrace;
+diff --git a/hotspot/make/linux/makefiles/mapfile-vers-product b/hotspot/make/linux/makefiles/mapfile-vers-product
+index e81f857f..7ae25b03 100644
+--- a/hotspot/make/linux/makefiles/mapfile-vers-product
++++ b/hotspot/make/linux/makefiles/mapfile-vers-product
+@@ -262,7 +262,6 @@ SUNWprivate_1.1 {
+                 numa_error;
+ 
+                 # Needed because there is no JVM interface for this.
+-                sysThreadAvailableStackWithSlack;
+ 
+                 # This is for Forte Analyzer profiling support.
+                 AsyncGetCallTrace;
+diff --git a/hotspot/make/linux/makefiles/vm.make b/hotspot/make/linux/makefiles/vm.make
+index bd36571f..85feb5ae 100644
+--- a/hotspot/make/linux/makefiles/vm.make
++++ b/hotspot/make/linux/makefiles/vm.make
+@@ -252,7 +252,7 @@ VMDEF_PAT := ^_ZN9Arguments17SharedArchivePathE$$|$(VMDEF_PAT)
+ 
+ vm.def: $(Res_Files) $(Obj_Files)
+ 	$(QUIETLY) $(NM) --defined-only $(Obj_Files) | sort -k3 -u | \
+-	awk '$$3 ~ /$(VMDEF_PAT)/ { print "\t" $$3 ";" }' > $@
++	awk '$$3 ~ /$(VMDEF_PAT)/ && $$2 ~ /^[A-Z]$$/ && $$3 !~ /^_ZTVZ/ { print "\t" $$3 ";" }' > $@
+ 
+ mapfile_ext:
+ 	rm -f $@

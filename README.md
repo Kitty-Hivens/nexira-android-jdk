@@ -33,8 +33,8 @@ A release is a tag `jdk-<version>` (for example `jdk-25.0.5`). The workflow buil
 |-------|------------------|--------------------------------------------------------------|
 | 25    | 25.0.5           | Runs on an arm64 Android 16 device (JIT, threads, GC, nio)   |
 | 21    | 21.0.13          | Builds, not yet run on a device                              |
-| 17    |                  | Not built yet                                                |
-| 8     |                  | Not built yet, there is no maintained Android patch set      |
+| 17    | 17.0.21          | Builds, not yet run on a device                              |
+| 8     | 8u492            | Builds (JRE image), not yet run on a device                  |
 
 ## License
 
