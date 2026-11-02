@@ -1,0 +1,21 @@
+Subject: [PATCH] nexira: enable the android heap tagging workaround under
+ __ANDROID__
+
+---
+diff --git a/src/java.base/share/native/libjli/java.c b/src/java.base/share/native/libjli/java.c
+index ae27448c7..d5ca49358 100644
+--- a/src/java.base/share/native/libjli/java.c
++++ b/src/java.base/share/native/libjli/java.c
+@@ -56,9 +56,11 @@
+ #include "java.h"
+ #include "jni.h"
+ 
+-#ifdef __TERMUX__
++#ifdef __ANDROID__
+ #include <stdbool.h>
+ #include <dlfcn.h>
++#include <malloc.h>
++#include <android/api-level.h>
+ static void android_disable_tags() {
+     void *lib_handle = dlopen("libc.so", RTLD_LAZY);
+     if (lib_handle) {
