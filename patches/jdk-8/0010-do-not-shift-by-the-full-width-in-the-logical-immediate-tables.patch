@@ -1,0 +1,34 @@
+Subject: [PATCH] nexira: do not shift by the full width in the logical immediate tables
+
+The bit mask helpers and replicate shifted a value by its own width in the 32 and 64 bit cases. The GNU compiler happened to evaluate that as the author meant and clang optimises it away, so the table of logical immediates came out unusable and the VM stopped while generating its first stub.
+
+---
+diff --git a/hotspot/src/cpu/aarch64/vm/immediate_aarch64.cpp b/hotspot/src/cpu/aarch64/vm/immediate_aarch64.cpp
+index 9f606ff3..45ad946e 100644
+--- a/hotspot/src/cpu/aarch64/vm/immediate_aarch64.cpp
++++ b/hotspot/src/cpu/aarch64/vm/immediate_aarch64.cpp
+@@ -73,13 +73,13 @@ static inline u_int64_t ones(int N)
+ static inline u_int32_t mask32(int hi = 31, int lo = 0)
+ {
+   int nbits = (hi + 1) - lo;
+-  return ((1 << nbits) - 1) << lo;
++  return (nbits >= 32 ? 0xffffffffu : ((1u << nbits) - 1)) << lo;
+ }
+ 
+ static inline u_int64_t mask64(int hi = 63, int lo = 0)
+ {
+   int nbits = (hi + 1) - lo;
+-  return ((1L << nbits) - 1) << lo;
++  return (nbits >= 64 ? ~0UL : ((1UL << nbits) - 1)) << lo;
+ }
+ 
+ // pick bits [hi,...,lo] from val
+@@ -126,7 +126,7 @@ u_int64_t replicate(u_int64_t bits, int nbits, int count)
+   // nbits may be 64 in which case we want mask to be -1
+   u_int64_t mask = ones(nbits);
+   for (int i = 0; i < count ; i++) {
+-    result <<= nbits;
++    result = (nbits >= 64) ? 0 : (result << nbits);
+     result |= (bits & mask);
+   }
+   return result;

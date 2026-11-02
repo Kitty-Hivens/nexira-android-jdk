@@ -21,7 +21,9 @@ fi
 # 17 and 8 do not ask for X11 in a headless build, but the headless AWT library still includes its headers.
 if [ "$MAJOR" -le 17 ]; then X11_ARGS+=(--with-extra-cflags="-I$XINC" --with-extra-cxxflags="-I$XINC"); fi
 # 8u does not make its native libraries position independent on its own, which a shared library needs.
-if [ "$MAJOR" = 8 ]; then X11_ARGS=(--x-includes="$XINC" --x-libraries="$STUBS" --with-extra-cflags="-I$XINC -fPIC" --with-extra-cxxflags="-I$XINC -fPIC"); fi
+# Its VM also calls methods on a null mark word, which a newer compiler may assume cannot happen unless
+# it is told otherwise, as the later releases already do for clang.
+if [ "$MAJOR" = 8 ]; then X11_ARGS=(--x-includes="$XINC" --x-libraries="$STUBS" --with-extra-cflags="-I$XINC -fPIC" --with-extra-cxxflags="-I$XINC -fPIC -fno-delete-null-pointer-checks"); fi
 
 # The cups, fontconfig and alsa headers are only read, but pointing the build at all of /usr/include
 # puts the host's C library headers ahead of the NDK sysroot's in every file of the desktop libraries.

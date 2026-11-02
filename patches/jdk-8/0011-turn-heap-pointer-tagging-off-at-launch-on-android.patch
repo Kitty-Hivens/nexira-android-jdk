@@ -1,0 +1,53 @@
+Subject: [PATCH] nexira: turn heap pointer tagging off at launch on Android
+
+The VM computes addresses from heap pointers whose top byte Android sets, and a field it encodes overflows. The same workaround the later releases carry.
+
+---
+diff --git a/jdk/src/share/bin/java.c b/jdk/src/share/bin/java.c
+index a15a174a..7b6b2fcb 100644
+--- a/jdk/src/share/bin/java.c
++++ b/jdk/src/share/bin/java.c
+@@ -53,6 +53,34 @@
+ 
+ #include "java.h"
+ 
++#ifdef __ANDROID__
++#include <stdbool.h>
++#include <dlfcn.h>
++#include <malloc.h>
++#include <android/api-level.h>
++/* A tagged heap pointer carries a byte the VM's address arithmetic does not expect. */
++static void android_disable_tags() {
++    void *lib_handle = dlopen("libc.so", RTLD_LAZY);
++    if (lib_handle) {
++        if (android_get_device_api_level() >= 31) {
++            int (*mallopt_func)(int, int) = dlsym(lib_handle, "mallopt");
++            if (mallopt_func) {
++                mallopt_func(M_BIONIC_SET_HEAP_TAGGING_LEVEL, 0);
++            }
++            return;
++        }
++        bool (*android_mallopt)(int opcode, void* arg, size_t arg_size) = dlsym(lib_handle, "android_mallopt");
++        if (android_mallopt) {
++            int android_malloc_tag_level = 0;
++            android_mallopt(8, &android_malloc_tag_level, sizeof(android_malloc_tag_level));
++        }
++        dlclose(lib_handle);
++    }
++}
++#else
++static void android_disable_tags(){}
++#endif
++
+ /*
+  * A NOTE TO DEVELOPERS: For performance reasons it is important that
+  * the program image remain relatively small until after SelectVersion
+@@ -204,6 +232,8 @@ JLI_Launch(int argc, char ** argv,              /* main argc, argc */
+     _wc_enabled = cpwildcard;
+     _ergo_policy = ergo;
+ 
++    android_disable_tags();
++
+     InitLauncher(javaw);
+     DumpState();
+     if (JLI_IsTraceLauncher()) {
