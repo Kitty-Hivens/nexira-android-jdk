@@ -4,8 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       major:
-        description: JDK major to build
-        default: "25"
+        description: JDK major to build, or all
+        default: all
+        type: choice
+        options: ["all", "8", "17", "21", "25"]
   push:
     tags:
       - "jdk-*"
@@ -14,37 +16,65 @@ permissions:
   contents: read
 
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      majors: ${{ steps.pick.outputs.majors }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            # jdk-8u492 is major 8, jdk-17.0.21 is major 17
+            version=${GITHUB_REF_NAME#jdk-}
+            case "$version" in
+              8u*) major=8 ;;
+              *)   major=${version%%.*} ;;
+            esac
+            echo "majors=[\"$major\"]" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.major }}" = all ]; then
+            echo 'majors=["8","17","21","25"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "majors=[\"${{ inputs.major }}\"]" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        major: ${{ fromJSON(needs.plan.outputs.majors) }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Resolve the major
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            version=${GITHUB_REF_NAME#jdk-}
-            echo "MAJOR=${version%%.*}" >> "$GITHUB_ENV"
-          else
-            echo "MAJOR=${{ inputs.major }}" >> "$GITHUB_ENV"
-          fi
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
+      # The cups, fontconfig, alsa and X11 headers are only read: 8, 17 and 21 want them even for a headless
+      # build, and 8 also unpacks the FreeType it builds for the target.
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm autoconf make zip unzip libasound2-dev libcups2-dev libfontconfig1-dev
+          sudo apt-get install -y clang llvm autoconf make zip unzip curl xz-utils \
+            libasound2-dev libcups2-dev libfontconfig1-dev \
+            libx11-dev libxext-dev libxrender-dev libxrandr-dev libxtst-dev libxt-dev
 
       - name: Build
-        run: scripts/build.sh "$MAJOR"
+        run: scripts/build.sh "${{ matrix.major }}"
+
+      - name: Check the archive against the tag
+        if: github.ref_type == 'tag'
+        run: |
+          built=$(ls work/out/*.zip)
+          [ "$(basename "$built")" = "jdk-${GITHUB_REF_NAME#jdk-}-android-aarch64.zip" ] \
+            || { echo "built $(basename "$built"), tag is $GITHUB_REF_NAME"; exit 1; }
 
       - uses: actions/upload-artifact@v7
         with:
-          name: jdk-${{ env.MAJOR }}-android-aarch64
+          name: jdk-${{ matrix.major }}-android-aarch64
           path: |
             work/out/*.zip
             work/out/*.sha256
@@ -54,9 +84,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          built=$(ls work/out/*.zip)
-          [ "$(basename "$built")" = "jdk-${GITHUB_REF_NAME#jdk-}-android-aarch64.zip" ] \
-            || { echo "built $(basename "$built"), tag is $GITHUB_REF_NAME"; exit 1; }
           gh release create "$GITHUB_REF_NAME" work/out/*.zip work/out/*.sha256 \
             --title "OpenJDK ${GITHUB_REF_NAME#jdk-} for Android" \
             --notes "OpenJDK ${GITHUB_REF_NAME#jdk-} for Android aarch64. Verify the download against the attached SHA-256 file."
