@@ -28,13 +28,9 @@ if [ "$MAJOR" = 8 ]; then X11_ARGS=(--x-includes="$XINC" --x-libraries="$STUBS" 
 # The cups, fontconfig and alsa headers are only read, but pointing the build at all of /usr/include
 # puts the host's C library headers ahead of the NDK sysroot's in every file of the desktop libraries.
 HOSTINC=$WORK/hostinc
-if [ "$MAJOR" -lt 25 ]; then
-  rm -rf "$HOSTINC" && mkdir -p "$HOSTINC"
-  for d in cups fontconfig alsa; do ln -s "/usr/include/$d" "$HOSTINC/$d"; done
-  INCLUDES=$HOSTINC
-else
-  INCLUDES=/usr/include
-fi
+rm -rf "$HOSTINC" && mkdir -p "$HOSTINC"
+for d in cups fontconfig alsa; do ln -s "/usr/include/$d" "$HOSTINC/$d"; done
+INCLUDES=$HOSTINC
 
 if [ "$MAJOR" = 8 ]; then
   "$(dirname "$0")/freetype.sh" 8
