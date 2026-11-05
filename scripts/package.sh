@@ -34,6 +34,11 @@ rm -rf lib/src.zip lib/ct.sym lib/jexec lib/jspawnhelper lib/jfr lib/classlist l
   lib/librmi.so lib/libsctp.so lib/libmanagement_agent.so lib/libjawt.so
 fi
 find . -name '*.so' -exec "$LLVM/bin/llvm-strip" --strip-unneeded {} +
+# The font library calls into the headless AWT library without naming it, and counts on a loader that binds late and on
+# AWT having opened it first. Bionic binds on load, so the dependency is written down.
+for font in lib/libfontmanager.so lib/aarch64/libfontmanager.so; do
+  if [ -f "$font" ]; then patchelf --add-needed libawt_headless.so "$font"; fi
+done
 
 cd "$OUT"
 rm -f "$name.zip" && zip -qr -X -9 "$name.zip" "$name"

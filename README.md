@@ -15,7 +15,7 @@ Upstream OpenJDK update releases, cross compiled with the Android NDK, with a sm
 
 ## Building
 
-Needs a Linux x86_64 host with `clang`, `llvm`, `autoconf`, `make`, `zip`, `unzip`, and the cups, fontconfig and alsa development headers (they are only read, nothing links against them).
+Needs a Linux x86_64 host with `clang`, `llvm`, `autoconf`, `make`, `zip`, `unzip`, `patchelf`, and the cups, fontconfig and alsa development headers (they are only read, nothing links against them).
 
     scripts/build.sh 25
 
